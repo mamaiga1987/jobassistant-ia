@@ -1,0 +1,40 @@
+version: '3.8'
+services:
+  jobassistant-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jobassistant-backend
+    restart: unless-stopped
+    env_file: .env
+    networks:
+      - web
+      - jobassistant-internal
+      - analytics-net
+
+  jobassistant-frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: jobassistant-frontend
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=web"
+      - "traefik.http.routers.jobassistant.rule=Host(`jobassistant.monairbyte.eu`)"
+      - "traefik.http.routers.jobassistant.entrypoints=websecure"
+      - "traefik.http.routers.jobassistant.tls.certresolver=mytlschallenge"
+      - "traefik.http.routers.jobassistant.service=jobassistant-frontend-svc"
+      - "traefik.http.services.jobassistant-frontend-svc.loadbalancer.server.port=80"
+    networks:
+      - web
+      - jobassistant-internal
+
+networks:
+  web:
+    external: true
+  jobassistant-internal:
+    driver: bridge
+  analytics-net:
+    external: true
+    name: bi-stack_analytics-net

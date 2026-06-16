@@ -1524,3 +1524,33 @@ app.post('/api/alertes/check-instant', async (req, res) => {
     res.json({sent:true,count:result.rows.length});
   } catch(e) { res.status(500).json({error:e.message}); }
 });
+
+// ── STATISTIQUES AVANCÉES ─────────────────────────────────────────────────────
+app.get('/api/stats/avancees', async (req, res) => {
+  try {
+    // Meilleur jour pour postuler
+    const parJour = await pool.query(`
+      SELECT TO_CHAR(date_postulation,'Day') as jour, COUNT(*) as nb,
+        COUNT(CASE WHEN statut!='postule' THEN 1 END) as reponses
+      FROM ja_candidatures WHERE date_postulation IS NOT NULL
+      GROUP BY TO_CHAR(date_postulation,'Day')
+      ORDER BY nb DESC`);
+
+    // Taux de reponse par source
+    const parSource = await pool.query(`
+      SELECT source_candidature, COUNT(*) as total,
+        COUNT(CASE WHEN statut!='postule' THEN 1 END) as reponses
+      FROM ja_candidatures GROUP BY source_candidature`);
+
+    // Duree moyenne processus
+    const duree = await pool.query(`
+      SELECT AVG(EXTRACT(DAY FROM NOW()-date_postulation)) as duree_moy,
+        COUNT(*) as total,
+        COUNT(CASE WHEN statut='entretien' THEN 1 END) as entretiens,
+        COUNT(CASE WHEN statut='offre' THEN 1 END) as offres,
+        COUNT(CASE WHEN statut='refus' THEN 1 END) as refus
+      FROM ja_candidatures WHERE date_postulation IS NOT NULL`);
+
+    res.json({ parJour: parJour.rows, parSource: parSource.rows, duree: duree.rows[0] });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});

@@ -39,6 +39,7 @@ const navItems = [
   {id:'portfolio',icon:<Star size={18}/>,label:'Portfolio projets'},
   {id:'agenda',icon:<Bell size={18}/>,label:'Agenda recherche'},
   {id:'blacklist',icon:<X size={18}/>,label:'Blacklist entreprises'},
+  {id:'stats',icon:<Briefcase size={18}/>,label:'Statistiques avancees'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -559,7 +560,14 @@ const CandidaturesPage = () => {
   const deleteCandidat = async (id) => { if(!window.confirm('Supprimer ?'))return; await axios.delete(API+'/candidatures/'+id); setCandidatures(c=>c.filter(x=>x.id!==id)); };
   const joursDepuis = (date) => { const j=Math.floor((Date.now()-new Date(date))/86400000); return j===0?"Aujourd'hui":j===1?'Hier':'Il y a '+j+'j'; };
   const aRelancer = (c) => c.statut==='postule'&&Math.floor((Date.now()-new Date(c.date_postulation))/86400000)>=7;
+  const [searchCand, setSearchCand] = useState('');
+  const [filterStatut, setFilterStatut] = useState('tous');
   const nbRelance = candidatures.filter(aRelancer).length;
+  const candFiltered = candidatures.filter(c => {
+    const matchSearch = !searchCand || (c.title||'').toLowerCase().includes(searchCand.toLowerCase()) || (c.company||'').toLowerCase().includes(searchCand.toLowerCase());
+    const matchStatut = filterStatut==='tous' || c.statut===filterStatut;
+    return matchSearch && matchStatut;
+  });
   const exportCSV = () => window.open(API+'/candidatures/export','_blank');
   const [showManuel, setShowManuel] = React.useState(false);
   const [formManuel, setFormManuel] = React.useState({title:'',company:'',url:'',contact_rh:'',contact_linkedin:'',contact_email:'',notes:'',source_candidature:'LinkedIn',motivation_score:3});
@@ -605,8 +613,16 @@ const CandidaturesPage = () => {
           </div>
         </div>
       )}
+      <div style={{...G.card,marginBottom:10,padding:10}}>
+        <input value={searchCand} onChange={e=>setSearchCand(e.target.value)} placeholder="Rechercher par titre ou entreprise..." style={{...G.inp,marginBottom:8,fontSize:12}}/>
+        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+          {['tous','postule','relance','entretien','offre','refus'].map(s=>(
+            <button key={s} onClick={()=>setFilterStatut(s)} style={{...G.btn,padding:'3px 10px',fontSize:10,background:filterStatut===s?'rgba(139,92,246,0.3)':'transparent',color:filterStatut===s?'#a78bfa':'#64748b',border:'1px solid '+(filterStatut===s?'rgba(139,92,246,0.5)':'#334155')}}>{s}</button>
+          ))}
+        </div>
+      </div>
       {nbRelance>0&&<div style={{...G.card,background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',marginBottom:12,fontSize:12,color:'#f59e0b',fontWeight:600}}>🔔 {nbRelance} candidature(s) a relancer</div>}
-      {candidatures.length===0?<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune candidature — Postule sur une offre pour demarrer</div>:candidatures.map(c=>{
+      {candFiltered.length===0?<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune candidature trouvee</div>:candFiltered.map(c=>{
         const s=STATUTS.find(x=>x.id===c.statut)||STATUTS[0];
         return (
           <div key={c.id} style={{...G.card,marginBottom:10,borderLeft:'3px solid '+s.color}}>
@@ -820,6 +836,66 @@ const PortfolioPage = () => {
       <div style={{...G.card,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
         <div style={{fontSize:12,fontWeight:700,color:'#a78bfa',marginBottom:6}}>GitHub</div>
         <a href="https://github.com/mamaiga1987" target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:'#60a5fa'}}>github.com/mamaiga1987</a>
+      </div>
+    </div>
+  );
+};
+
+const StatsAvanceesPage = () => {
+  const [data, setData] = React.useState(null);
+  React.useEffect(()=>{ axios.get(API+'/stats/avancees').then(r=>setData(r.data)).catch(()=>setData({})); },[]);
+  if(!data) return <div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Chargement...</div>;
+  const d = data.duree||{};
+  return (
+    <div>
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
+        {[
+          {label:'Total candidatures',value:parseInt(d.total||0),color:'#8b5cf6'},
+          {label:'Entretiens',value:parseInt(d.entretiens||0),color:'#f59e0b'},
+          {label:'Offres recues',value:parseInt(d.offres||0),color:'#10b981'},
+          {label:'Refus',value:parseInt(d.refus||0),color:'#ef4444'},
+        ].map((s,i)=>(
+          <div key={i} style={{...G.card,textAlign:'center',padding:12,borderTop:'3px solid '+s.color}}>
+            <div style={{fontSize:24,fontWeight:800,color:s.color}}>{s.value}</div>
+            <div style={{fontSize:10,color:'#64748b'}}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:10}}>Taux de reponse par source</div>
+        {(data.parSource||[]).map((s,i)=>{
+          const taux = s.total>0?Math.round(parseInt(s.reponses)/parseInt(s.total)*100):0;
+          return (
+            <div key={i} style={{marginBottom:8}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                <span style={{fontSize:11,color:'#94a3b8'}}>{s.source_candidature||'?'} ({s.total})</span>
+                <span style={{fontSize:11,color:taux>30?'#22c55e':taux>10?'#f59e0b':'#ef4444',fontWeight:700}}>{taux}%</span>
+              </div>
+              <div style={{height:5,background:'rgba(30,41,59,0.8)',borderRadius:3}}>
+                <div style={{height:5,width:taux+'%',background:taux>30?'#22c55e':taux>10?'#f59e0b':'#ef4444',borderRadius:3}}/>
+              </div>
+            </div>
+          );
+        })}
+        {(data.parSource||[]).length===0&&<div style={{fontSize:12,color:'#64748b'}}>Pas encore de donnees</div>}
+      </div>
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:10}}>Meilleur jour pour postuler</div>
+        {(data.parJour||[]).map((j,i)=>{
+          const taux = j.nb>0?Math.round(parseInt(j.reponses)/parseInt(j.nb)*100):0;
+          return (
+            <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid rgba(139,92,246,0.08)'}}>
+              <span style={{fontSize:12,color:'#94a3b8'}}>{j.jour?.trim()}</span>
+              <span style={{fontSize:11,color:'#64748b'}}>{j.nb} cand. · <span style={{color:taux>20?'#22c55e':'#f59e0b',fontWeight:700}}>{taux}% rep.</span></span>
+            </div>
+          );
+        })}
+        {(data.parJour||[]).length===0&&<div style={{fontSize:12,color:'#64748b'}}>Pas encore de donnees</div>}
+      </div>
+      <div style={{...G.card}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:8}}>Delai moyen</div>
+        <div style={{fontSize:28,fontWeight:800,color:'#8b5cf6'}}>{Math.round(parseFloat(d.duree_moy||0))} jours</div>
+        <div style={{fontSize:11,color:'#64748b'}}>depuis la date de postulation</div>
       </div>
     </div>
   );
@@ -1252,7 +1328,7 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',stats:'Statistiques avancees'};
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
@@ -1267,6 +1343,7 @@ export default function App() {
       case 'portfolio': return <PortfolioPage key={Date.now()}/>;
       case 'agenda': return <AgendaPage key={Date.now()}/>;
       case 'blacklist': return <BlacklistPage key={Date.now()}/>;
+      case 'stats': return <StatsAvanceesPage key={Date.now()}/>;
       default: return null;
     }
   };

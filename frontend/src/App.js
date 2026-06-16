@@ -132,6 +132,49 @@ const PitchIA = ({ offre }) => {
   );
 };
 
+const SimulateurEntretien = ({ offre }) => {
+  const [open, setOpen] = React.useState(false);
+  const [historique, setHistorique] = React.useState([]);
+  const [reponse, setReponse] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+
+  const envoyer = async (rep) => {
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/simuler-entretien', {reponse:rep||'', historique});
+    setHistorique(r.data.historique);
+    setReponse('');
+    setLoading(false);
+  };
+
+  const demarrer = () => { setOpen(true); setHistorique([]); envoyer(''); };
+
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={open?()=>setOpen(false):demarrer} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(236,72,153,0.2)',color:'#ec4899',border:'1px solid rgba(236,72,153,0.3)'}}>
+        🎭 {open?'Fermer le simulateur':'Simuler un entretien IA'}
+      </button>
+      {open && (
+        <div style={{...G.card,marginTop:8,background:'rgba(236,72,153,0.05)',border:'1px solid rgba(236,72,153,0.2)'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'#ec4899',marginBottom:10}}>🎭 Simulateur entretien — {offre.company||offre.title}</div>
+          <div style={{maxHeight:300,overflowY:'auto',marginBottom:10}}>
+            {historique.map((m,i)=>(
+              <div key={i} style={{marginBottom:8,padding:'8px 10px',borderRadius:8,background:m.role==='user'?'rgba(139,92,246,0.1)':'rgba(236,72,153,0.08)',border:'1px solid '+(m.role==='user'?'rgba(139,92,246,0.2)':'rgba(236,72,153,0.2)')}}>
+                <div style={{fontSize:10,color:'#64748b',marginBottom:4}}>{m.role==='user'?'Vous':'Recruteur IA'}</div>
+                <div style={{fontSize:12,color:'#e2e8f0',lineHeight:1.6,whiteSpace:'pre-wrap'}}>{m.content}</div>
+              </div>
+            ))}
+            {loading&&<div style={{textAlign:'center',color:'#64748b',fontSize:12}}>Le recruteur reflechit...</div>}
+          </div>
+          <div style={{display:'flex',gap:8}}>
+            <textarea value={reponse} onChange={e=>setReponse(e.target.value)} placeholder="Votre reponse..." style={{...G.inp,flex:1,height:60,resize:'none',fontSize:12}} onKeyDown={e=>e.key==='Enter'&&!e.shiftKey&&(e.preventDefault(),envoyer(reponse))}/>
+            <button onClick={()=>envoyer(reponse)} disabled={loading||!reponse.trim()} style={{...G.btn,padding:'8px 14px',fontSize:12,background:'rgba(236,72,153,0.3)',color:'#ec4899'}}>Envoyer</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const MatchCV = ({ offre }) => {
   const [data, setData] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
@@ -292,6 +335,8 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
   const [minScore, setMinScore] = useState(50);
   const [sourceFilter, setSourceFilter] = useState('tous');
   const [detail, setDetail] = useState(null);
+  const [compareIds, setCompareIds] = useState([]);
+  const [compareData, setCompareData] = useState(null);
   const suggestions = ['Product Owner','MOA Data','Data Analyst','Chef de Projet','Business Analyst','Data Engineer','Scrum Master'];
 
   useEffect(() => {
@@ -310,12 +355,43 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
 
   const fetchJobs = () => {};
   const filtered = jobs;
+  const lancerComparaison = async () => {
+    if(compareIds.length < 2) return alert('Selectionnez 2 offres avec ⚖');
+    const r = await axios.post(API+'/jobs/comparer', {ids: compareIds});
+    setCompareData(r.data);
+  };
 
   const toggleFavori = async (job) => {
     const isFav = favoris.includes(job.id);
     if (isFav) { await axios.delete(API+'/favoris/'+job.id); setFavoris(f=>f.filter(x=>x!==job.id)); }
     else { await axios.post(API+'/favoris',{job_id:job.id}); setFavoris(f=>[...f,job.id]); }
   };
+
+  if (compareData) return (
+    <div>
+      <button onClick={()=>setCompareData(null)} style={{background:'transparent',border:'none',color:'#8b5cf6',cursor:'pointer',fontSize:13,marginBottom:16}}>← Retour</button>
+      <div style={{fontSize:14,fontWeight:700,color:'#fff',marginBottom:12}}>Comparaison de {compareData.length} offres</div>
+      <div style={{display:'grid',gridTemplateColumns:'repeat('+compareData.length+',1fr)',gap:10}}>
+        {compareData.map((job,i)=>(
+          <div key={i} style={{...G.card,borderTop:'3px solid '+['#8b5cf6','#3b82f6','#10b981'][i]}}>
+            <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:4}}>{job.title}</div>
+            <div style={{fontSize:11,color:'#64748b',marginBottom:8}}>{job.company}</div>
+            <ScoreCircle score={job.ia_score||0} size={52}/>
+            <div style={{marginTop:8}}>
+              <div style={{fontSize:10,color:'#22c55e',marginBottom:4}}>Competences rares: {job.raresMatch?.length||0}</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:3}}>{(job.raresMatch||[]).map(c=><span key={c} style={{...G.tag,fontSize:9}}>{c}</span>)}</div>
+            </div>
+            <div style={{marginTop:8}}>
+              <div style={{fontSize:10,color:'#60a5fa',marginBottom:4}}>Standard: {job.stdMatch?.length||0}</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:3}}>{(job.stdMatch||[]).map(c=><span key={c} style={{...G.tag,fontSize:9,color:'#60a5fa',background:'rgba(59,130,246,0.1)'}}>{c}</span>)}</div>
+            </div>
+            <div style={{marginTop:8,fontSize:10,color:job.idf?'#22c55e':'#ef4444'}}>{job.idf?'✅ IDF':'❌ Hors IDF'}</div>
+            <button onClick={()=>onPostuler(job)} style={{...G.btn,width:'100%',padding:'8px',fontSize:11,marginTop:8}}><Send size={11}/> Postuler</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 
   if (detail) return (
     <div>
@@ -339,6 +415,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
         <ScoreDetail offre={detail}/>
         <PitchIA offre={detail}/>
         <EntretienIA offre={detail}/>
+        <SimulateurEntretien offre={detail}/>
         <FranceTravailMessage offre={detail}/>
         <LinkedInMessage offre={detail}/>
         <LettreMotivationIA offre={detail}/>
@@ -379,7 +456,10 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
           {suggestions.map(s=><button key={s} onClick={()=>setSearch(s)} style={{background:'rgba(139,92,246,0.08)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.15)',borderRadius:20,padding:'3px 10px',fontSize:11,cursor:'pointer'}}>{s}</button>)}
         </div>
       </div>
-      <div style={{fontSize:12,color:'#64748b',marginBottom:12}}>{filtered.length} offres {minScore>0?'>= '+minScore+'%':''}</div>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <div style={{fontSize:12,color:'#64748b'}}>{filtered.length} offres {minScore>0?'>= '+minScore+'%':''}</div>
+        {compareIds.length>0&&<button onClick={lancerComparaison} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(16,185,129,0.2)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>⚖ Comparer ({compareIds.length})</button>}
+      </div>
       {loading&&<div style={{textAlign:'center',padding:40,color:'#64748b'}}>Chargement...</div>}
       {filtered.map(job=>(
         <div key={job.id} style={{...G.card,marginBottom:12,cursor:'pointer'}} onClick={()=>setDetail(job)}>
@@ -396,6 +476,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
             <div style={{fontSize:11,color:'#475569'}}>{job.published_at?new Date(job.published_at).toLocaleDateString('fr-FR'):''} · via {job.source}</div>
             <div style={{display:'flex',gap:8}} onClick={e=>e.stopPropagation()}>
               <button onClick={()=>toggleFavori(job)} style={{background:'transparent',border:'none',cursor:'pointer',color:favoris.includes(job.id)?'#f59e0b':'#334155'}}>★</button>
+              <button onClick={()=>setCompareIds(prev=>prev.includes(job.id)?prev.filter(x=>x!==job.id):[...prev.slice(-1),job.id])} style={{background:'transparent',border:'none',cursor:'pointer',color:compareIds.includes(job.id)?'#10b981':'#334155',fontSize:16}}>⚖</button>
               <button onClick={()=>onPostuler(job)} style={{...G.btn,padding:'6px 14px',fontSize:12,background:postules.includes(job.id)?'rgba(34,197,94,0.3)':'linear-gradient(135deg,#8b5cf6,#3b82f6)',color:postules.includes(job.id)?'#22c55e':'#fff'}}><Send size={12}/> {postules.includes(job.id)?'Postule !':'Postuler'}</button>
               {job.url&&<a href={job.url} target="_blank" rel="noopener noreferrer" onClick={()=>onPostuler(job)} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',textDecoration:'none'}}><ExternalLink size={12}/> Voir</a>}
             </div>
@@ -424,10 +505,14 @@ const CandidaturesPage = () => {
   const joursDepuis = (date) => { const j=Math.floor((Date.now()-new Date(date))/86400000); return j===0?"Aujourd'hui":j===1?'Hier':'Il y a '+j+'j'; };
   const aRelancer = (c) => c.statut==='postule'&&Math.floor((Date.now()-new Date(c.date_postulation))/86400000)>=7;
   const nbRelance = candidatures.filter(aRelancer).length;
+  const exportCSV = () => window.open(API+'/candidatures/export','_blank');
   return (
     <div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginBottom:12}}>
         {STATUTS.map(s=><div key={s.id} style={{...G.card,padding:10,textAlign:'center',borderTop:'3px solid '+s.color}}><div style={{fontSize:20,fontWeight:800,color:s.color}}>{candidatures.filter(c=>c.statut===s.id).length}</div><div style={{fontSize:11,color:'#94a3b8'}}>{s.emoji}</div></div>)}
+      </div>
+      <div style={{display:'flex',justifyContent:'flex-end',marginBottom:8}}>
+        <button onClick={exportCSV} style={{...G.btn,padding:'6px 14px',fontSize:11,background:'rgba(34,197,94,0.2)',color:'#22c55e',border:'1px solid rgba(34,197,94,0.3)'}}>📊 Export Excel</button>
       </div>
       {nbRelance>0&&<div style={{...G.card,background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',marginBottom:12,fontSize:12,color:'#f59e0b',fontWeight:600}}>🔔 {nbRelance} candidature(s) a relancer</div>}
       {candidatures.length===0?<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune candidature — Postule sur une offre pour demarrer</div>:candidatures.map(c=>{

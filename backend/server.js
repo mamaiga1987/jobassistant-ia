@@ -1319,3 +1319,113 @@ app.get('/api/stats/tendances', async (req, res) => {
     res.json({ parJour: parJour.rows, parMetier: parMetier.rows, parSource: parSource.rows });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── COMPARATEUR OFFRES ────────────────────────────────────────────────────────
+app.post('/api/jobs/comparer', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    const r = await pool.query('SELECT * FROM ja_jobs WHERE id = ANY($1)', [ids]);
+    const profil = await getProfil();
+    
+    const jobs = r.rows.map(job => {
+      const full = (job.title+' '+job.description+' '+(job.tags||[]).join(' ')).toLowerCase();
+      const rares = ['rag','pgvector','apache superset','langchain','llamaindex','openai api','mlops','clickhouse'];
+      const std = ['sql','python','power bi','agile','scrum','docker','git','etl'];
+      return {
+        ...job,
+        raresMatch: rares.filter(c=>full.includes(c)),
+        stdMatch: std.filter(c=>full.includes(c)),
+        idf: full.includes('paris')||full.includes('ile-de-france')||full.includes('91 -')||full.includes('92 -'),
+      };
+    });
+    res.json(jobs);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── RAPPELS QUOTIDIENS ────────────────────────────────────────────────────────
+app.post('/api/rappels/envoyer', async (req, res) => {
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({service:'gmail',auth:{user:'mmohamedassalia6@gmail.com',pass:process.env.GMAIL_PASS||''}});
+
+    // Offres top score nouvelles
+    const topOffres = await pool.query(`SELECT title, company, ia_score, url FROM ja_jobs WHERE ia_score >= 75 AND created_at > NOW() - INTERVAL '24 hours' ORDER BY ia_score DESC LIMIT 5`);
+    
+    // Candidatures à relancer
+    const aRelancer = await pool.query(`SELECT title, company FROM ja_candidatures WHERE statut='postule' AND date_postulation < NOW() - INTERVAL '7 days' LIMIT 5`);
+    
+    // Stats du jour
+    const stats = await pool.query(`SELECT COUNT(*) as total, COUNT(CASE WHEN created_at > NOW() - INTERVAL '24 hours' THEN 1 END) as nouvelles FROM ja_jobs`);
+
+    const topHtml = topOffres.rows.map(j=>`<li><strong>${j.title}</strong> — ${j.company||'?'} — <span style="color:#22c55e">${j.ia_score}%</span></li>`).join('');
+    const relanceHtml = aRelancer.rows.map(c=>`<li>${c.title} chez ${c.company||'?'}</li>`).join('');
+
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:20px;background:#f0f4f8">
+<div style="max-width:600px;margin:0 auto;background:white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)">
+<div style="background:linear-gradient(135deg,#1e3a5f,#2d6a9f);padding:24px;color:white;text-align:center">
+<h2 style="margin:0">📋 Agenda du jour — ${new Date().toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})}</h2>
+</div>
+<div style="padding:20px">
+<h3 style="color:#1e3a5f">📊 Marché aujourd'hui</h3>
+<p>${stats.rows[0].total} offres en base · <strong>${stats.rows[0].nouvelles} nouvelles aujourd'hui</strong></p>
+${topOffres.rows.length>0?`<h3 style="color:#1e3a5f">🔥 Offres prioritaires à postuler</h3><ul>${topHtml}</ul>`:''}
+${aRelancer.rows.length>0?`<h3 style="color:#f59e0b">🔔 Candidatures à relancer</h3><ul>${relanceHtml}</ul>`:''}
+<h3 style="color:#1e3a5f">✅ Actions du jour</h3>
+<ul>
+<li>Consulter les nouvelles offres sur <a href="https://jobassistant.monairbyte.eu">JobAssistant IA</a></li>
+${aRelancer.rows.length>0?'<li>Relancer '+aRelancer.rows.length+' candidature(s) sans réponse</li>':''}
+<li>Mettre à jour le statut de tes candidatures</li>
+</ul>
+</div>
+<div style="background:#1e3a5f;color:rgba(255,255,255,0.7);padding:12px;text-align:center;font-size:12px">JobAssistant IA — jobassistant.monairbyte.eu</div>
+</div></body></html>`;
+
+    await transporter.sendMail({
+      from:'JobAssistant IA <mmohamedassalia6@gmail.com>',
+      to:'mmohamedassalia6@gmail.com',
+      subject:`📋 Agenda du ${new Date().toLocaleDateString('fr-FR')} — ${stats.rows[0].nouvelles} nouvelles offres`,
+      html
+    });
+
+    res.json({sent:true, topOffres:topOffres.rows.length, aRelancer:aRelancer.rows.length});
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── EXPORT EXCEL CANDIDATURES ─────────────────────────────────────────────────
+app.get('/api/candidatures/export', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT title, company, url, statut, date_postulation, notes FROM ja_candidatures ORDER BY date_postulation DESC');
+    const rows = [['Titre', 'Entreprise', 'URL', 'Statut', 'Date postulation', 'Notes']];
+    r.rows.forEach(c => rows.push([c.title, c.company||'', c.url||'', c.statut||'', c.date_postulation?new Date(c.date_postulation).toLocaleDateString('fr-FR'):'', c.notes||'']));
+    
+    let csv = rows.map(r => r.map(v => '"'+String(v).replace(/"/g,'""')+'"').join(';')).join('\n');
+    res.setHeader('Content-Type', 'text/csv;charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename=candidatures.csv');
+    res.send('\ufeff' + csv);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SIMULATEUR ENTRETIEN ──────────────────────────────────────────────────────
+app.post('/api/jobs/:id/simuler-entretien', async (req, res) => {
+  try {
+    const { reponse, question, historique } = req.body;
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1',[req.params.id])).rows[0];
+    
+    const systemPrompt = `Tu es un recruteur senior qui conduit un entretien pour le poste "${job?.title}" chez ${job?.company||'cette entreprise'}. Le candidat est Mohamed Assalia Maiga, PO Data & IA, 9 ans exp, PSPO I PSM I. Pose des questions pertinentes, évalue les réponses et donne un feedback constructif. Sois professionnel mais bienveillant. Après chaque réponse, donne un score /10 et une question suivante.`;
+    
+    const messages = historique || [];
+    if(reponse) messages.push({role:'user', content: reponse});
+    else messages.push({role:'user', content: 'Bonjour, je suis prêt pour l\'entretien.'});
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:500,system:systemPrompt,messages});
+    const result = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',()=>resolve('Erreur'));r.write(body);r.end();
+    });
+
+    messages.push({role:'assistant', content: result});
+    res.json({ response: result, historique: messages });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});

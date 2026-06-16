@@ -287,7 +287,7 @@ app.post('/api/candidatures', async (req, res) => {
   try {
     const { job_id, title, company, url, statut } = req.body;
     const r = await pool.query(
-      'INSERT INTO ja_candidatures (job_id,title,company,url,statut) VALUES ($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING RETURNING *',
+      'INSERT INTO ja_candidatures (job_id,title,company,url,statut,date_postulation) VALUES ($1,$2,$3,$4,$5,NOW()) ON CONFLICT DO NOTHING RETURNING *',
       [job_id, title, company, url, statut||'postule']
     );
     res.json(r.rows[0]||{});
@@ -825,5 +825,497 @@ app.get('/api/veille/statut', async (req, res) => {
   try {
     const r = await pool.query('SELECT * FROM ja_veille_rapports ORDER BY created_at DESC LIMIT 5');
     res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SCORE DÉTAILLÉ ────────────────────────────────────────────────────────────
+app.get('/api/jobs/:id/score-detail', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1', [req.params.id])).rows[0];
+    if (!job) return res.status(404).json({ error: 'Offre non trouvée' });
+
+    const titleL = (job.title||'').toLowerCase();
+    const descL = (job.description||'').toLowerCase();
+    const full = titleL + ' ' + descL + ' ' + (job.tags||[]).join(' ').toLowerCase();
+
+    const details = [];
+    let total = 0;
+
+    // Titre
+    const metiersTitre = ['product owner','it product manager','data product manager','moa','amoa','chef de projet','analytics engineer','data engineer','ai engineer','data analyst','business analyst','data scientist','scrum master','lead data','architecte data','consultant data'];
+    let titreScore = 0;
+    metiersTitre.forEach(m => { if(titleL.includes(m)) titreScore += 12; });
+    if(titleL.includes('product owner') && (titleL.includes('data')||titleL.includes('ia'))) titreScore += 12;
+    if((titleL.includes('moa')||titleL.includes('maîtrise')) && titleL.includes('data')) titreScore += 12;
+    if(titleL.includes('data engineer')||titleL.includes('analytics engineer')) titreScore += 10;
+    if(titleL.includes('ai engineer')||titleL.includes('rag')) titreScore += 12;
+    titreScore = Math.min(titreScore, 40);
+    details.push({critere:'Titre du poste', points:titreScore, max:40, detail:titleL.includes('product owner')||titleL.includes('moa')||titleL.includes('data engineer')?'Métier ciblé détecté':'Titre générique'});
+    total += titreScore;
+
+    // Compétences rares
+    const rares = ['rag','pgvector','apache superset','langchain','llamaindex','langgraph','openai api','embeddings','mlops','headless bi','airbyte','clickhouse'];
+    const raresFound = rares.filter(c => full.includes(c));
+    const raresScore = Math.min(raresFound.length * 5, 20);
+    details.push({critere:'Compétences rares', points:raresScore, max:20, detail:raresFound.length > 0 ? raresFound.join(', ') : 'Aucune compétence rare détectée'});
+    total += raresScore;
+
+    // Compétences standard
+    const std = ['sql','python','power bi','agile','scrum','docker','n8n','etl','git','api','kpi','roadmap','backlog','data','bi','analytics'];
+    const stdFound = std.filter(c => full.includes(c));
+    const stdScore = Math.min(stdFound.length * 2, 15);
+    details.push({critere:'Compétences standard', points:stdScore, max:15, detail:stdFound.slice(0,5).join(', ')});
+    total += stdScore;
+
+    // Localisation
+    let locScore = 0;
+    if(full.includes('paris')||full.includes('ile-de-france')||full.includes('92 -')||full.includes('91 -')) locScore = 10;
+    else if(full.includes('remote')||full.includes('france')) locScore = 5;
+    details.push({critere:'Localisation IDF', points:locScore, max:10, detail:locScore===10?'Paris/IDF détecté':locScore===5?'France/Remote':'Hors IDF'});
+    total += locScore;
+
+    // Salaire
+    const salScore = full.match(/4[89][0-9]{3}|5[0-9]{4}|6[0-5][0-9]{3}/) ? 7 : 0;
+    details.push({critere:'Salaire compatible', points:salScore, max:7, detail:salScore?'Fourchette 48-65k détectée':'Non mentionné'});
+    total += salScore;
+
+    // Séniorité
+    const senScore = (full.includes('senior')||full.includes('confirmé')||full.includes('lead')) ? 5 : 2;
+    details.push({critere:'Séniorité', points:senScore, max:5, detail:senScore===5?'Profil senior requis':'Niveau non précisé'});
+    total += senScore;
+
+    res.json({ total: Math.min(total, 99), details, job: {title:job.title, company:job.company} });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PITCH IA ──────────────────────────────────────────────────────────────────
+app.post('/api/jobs/:id/pitch', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1', [req.params.id])).rows[0];
+    if (!job) return res.status(404).json({ error: 'Non trouvée' });
+
+    const prompt = `En 3 phrases max, génère un pitch percutant pour Mohamed Assalia Maiga (9 ans exp, PSPO I, RAG/pgvector/Superset) pour ce poste: "${job.title}" chez ${job.company||'?'}. Description: ${(job.description||'').slice(0,300)}. Le pitch doit montrer l'adéquation immédiate avec le poste. Commence directement par le pitch, pas d'introduction.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:200,messages:[{role:'user',content:prompt}]});
+    const pitch = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',e=>resolve('Erreur'));r.write(body);r.end();
+    });
+    res.json({ pitch });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PRÉPARATION ENTRETIEN ─────────────────────────────────────────────────────
+app.post('/api/jobs/:id/entretien', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1', [req.params.id])).rows[0];
+    if (!job) return res.status(404).json({ error: 'Non trouvée' });
+
+    const prompt = `Tu es coach carrière expert. Pour Mohamed Assalia Maiga (Product Owner Data & IA, 9 ans, Free Mobile/SFR/Orange, PSPO I PSM I, RAG/pgvector/Superset/Python/SQL), génère 5 questions d'entretien probables pour ce poste: "${job.title}" chez ${job.company||'?'}. Description: ${(job.description||'').slice(0,400)}. Pour chaque question, donne une réponse suggérée basée sur son profil réel. Format: Q: [question]\nR: [réponse suggérée]`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]});
+    const questions = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',e=>resolve('Erreur'));r.write(body);r.end();
+    });
+    res.json({ questions });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── CV PDF ────────────────────────────────────────────────────────────────────
+app.get('/api/profil/cv-pdf', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const html = `<!DOCTYPE html><html><head><meta charset=UTF-8><style>
+body{font-family:Arial,sans-serif;padding:30px;color:#333;max-width:800px;margin:0 auto;font-size:13px}
+h1{color:#1e3a5f;font-size:22px;margin:0 0 4px}
+h2{color:#1e3a5f;font-size:14px;border-bottom:2px solid #2d6a9f;padding-bottom:4px;margin:16px 0 8px}
+.subtitle{color:#2d6a9f;font-size:14px;margin-bottom:4px}
+.contact{color:#64748b;font-size:12px;margin-bottom:16px}
+.tags{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.tag{background:#e8f0ff;color:#2d6a9f;padding:3px 8px;border-radius:4px;font-size:11px}
+.section{margin-bottom:12px}
+.exp{margin-bottom:10px}
+.exp-title{font-weight:700;color:#1e3a5f}
+.exp-sub{color:#64748b;font-size:12px}
+@media print{body{padding:15px}}
+</style></head><body>
+<h1>${profil.nom}</h1>
+<div class=subtitle>${profil.titre}</div>
+<div class=contact>Longjumeau (91), Île-de-France | mmohamedassalia6@gmail.com | +33 778 501 767 | Disponible immédiatement</div>
+<h2>PROFIL</h2>
+<p>${profil.resume||'Product Owner Data & IA, IT Product Manager et Data Engineer avec '+profil.annees_experience+' ans d\'expérience en Data, Analytics et Télécommunications chez Free Mobile, SFR et Orange.'}</p>
+<h2>CERTIFICATIONS</h2>
+<div class=tags>${(profil.certifications||[]).map(c=>'<span class=tag>'+c+'</span>').join('')}</div>
+<h2>STACK TECHNIQUE</h2>
+<div class=tags>${(profil.competences||[]).map(c=>'<span class=tag>'+c+'</span>').join('')}</div>
+<h2>MÉTIERS CIBLÉS</h2>
+<div class=tags>${(profil.metiers||[]).map(m=>'<span class=tag>'+m+'</span>').join('')}</div>
+<h2>EXPÉRIENCES</h2>
+<div class=exp><div class=exp-title>IT Product Manager, Data Analytics — Free Mobile (Iliad Group)</div><div class=exp-sub>Juin 2022 – Mai 2026 | Paris, CDI</div><p>Pilotage roadmap analytique QoS/QoE nationale, 50 KPI réseau 3G/4G/5G, pipelines ETL/ELT, dashboards Power BI et Apache Superset. -40% délai détection incidents.</p></div>
+<div class=exp><div class=exp-title>Product Owner Data & IA — Projet Association (Bénévole)</div><div class=exp-sub>Janvier 2023 – Aujourd'hui | Longjumeau (91)</div><p>Plateforme 5 modules pour 150+ résidents. Architecture RAG: pgvector + OpenAI API + LangChain. DocTracker forensique, Headless BI Superset+React.</p></div>
+<div class=exp><div class=exp-title>Analyste QoS — Free Mobile</div><div class=exp-sub>Avril 2020 – Mai 2022 | Paris, CDI</div><p>Dashboards Power BI, 300+ stations RATP, zones blanches, reportings réglementaires.</p></div>
+<div class=exp><div class=exp-title>Ingénieur Radio — SFR NOC SPAR</div><div class=exp-sub>Novembre 2016 – Janvier 2020 | Vélizy, CDI</div><p>Analyse KPI 2G/3G/4G, worst cells, automatisation VBA et Power BI.</p></div>
+<h2>FORMATION</h2>
+<p>Master Composants et Antennes — Télécommunications | Université Paris-Sud (Paris XI) | 2014–2016</p>
+</body></html>`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SIMULATEUR SALAIRE ────────────────────────────────────────────────────────
+app.get('/api/stats/salaires', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        CASE 
+          WHEN title ILIKE '%product owner%' THEN 'Product Owner'
+          WHEN title ILIKE '%moa%' OR title ILIKE '%maîtrise%' THEN 'MOA/AMOA'
+          WHEN title ILIKE '%data engineer%' THEN 'Data Engineer'
+          WHEN title ILIKE '%analytics engineer%' THEN 'Analytics Engineer'
+          WHEN title ILIKE '%data analyst%' THEN 'Data Analyst'
+          WHEN title ILIKE '%business analyst%' THEN 'Business Analyst'
+          WHEN title ILIKE '%data scientist%' THEN 'Data Scientist'
+          ELSE 'Autre'
+        END as metier,
+        COUNT(*) as nb_offres,
+        ROUND(AVG(ia_score)) as score_moyen,
+        MAX(ia_score) as score_max
+      FROM ja_jobs
+      WHERE ia_score >= 50
+      GROUP BY 1
+      ORDER BY score_moyen DESC`);
+    res.json(result.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── PROFIL PUBLIC ─────────────────────────────────────────────────────────────
+app.get('/profil', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const stats = await pool.query('SELECT COUNT(*) as total, COUNT(CASE WHEN ia_score>=80 THEN 1 END) as top FROM ja_jobs');
+    const html = `<!DOCTYPE html><html><head><meta charset=UTF-8><meta name="viewport" content="width=device-width,initial-scale=1"><title>${profil.nom} — Profil</title><style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#060b18;color:#e2e8f0;min-height:100vh;padding:20px}
+.container{max-width:600px;margin:0 auto}
+.header{background:linear-gradient(135deg,#1e3a5f,#2d6a9f);border-radius:16px;padding:30px;text-align:center;margin-bottom:16px}
+h1{font-size:24px;font-weight:800;margin-bottom:6px}
+.subtitle{color:rgba(255,255,255,0.8);font-size:14px;margin-bottom:4px}
+.contact{color:rgba(255,255,255,0.6);font-size:12px}
+.card{background:rgba(15,23,42,0.85);border:1px solid rgba(139,92,246,0.18);border-radius:12px;padding:16px;margin-bottom:12px}
+.card h2{font-size:14px;color:#8b5cf6;margin-bottom:10px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{background:rgba(139,92,246,0.12);color:#a78bfa;border:1px solid rgba(139,92,246,0.2);border-radius:6px;padding:3px 10px;font-size:11px}
+.stats{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:12px}
+.stat{background:rgba(15,23,42,0.85);border:1px solid rgba(139,92,246,0.18);border-radius:12px;padding:12px;text-align:center}
+.stat-num{font-size:24px;font-weight:800;color:#8b5cf6}
+.stat-label{font-size:10px;color:#64748b;margin-top:4px}
+.badge{background:rgba(34,197,94,0.15);border:1px solid rgba(34,197,94,0.3);color:#22c55e;border-radius:8px;padding:8px 12px;font-size:12px;font-weight:600;margin:4px 0}
+.footer{text-align:center;color:#475569;font-size:11px;margin-top:16px}
+</style></head><body>
+<div class=container>
+  <div class=header>
+    <h1>${profil.nom}</h1>
+    <div class=subtitle>${profil.titre}</div>
+    <div class=contact>Longjumeau (91) • Disponible immédiatement • mmohamedassalia6@gmail.com</div>
+  </div>
+  <div class=stats>
+    <div class=stat><div class=stat-num>${profil.annees_experience}</div><div class=stat-label>Ans d'exp.</div></div>
+    <div class=stat><div class=stat-num>${(profil.competences||[]).length}</div><div class=stat-label>Compétences</div></div>
+    <div class=stat><div class=stat-num>${(profil.metiers||[]).length}</div><div class=stat-label>Métiers ciblés</div></div>
+  </div>
+  <div class=card>
+    <h2>Certifications</h2>
+    ${(profil.certifications||[]).map(c=>'<div class=badge>✅ '+c+'</div>').join('')}
+  </div>
+  <div class=card>
+    <h2>Stack Technique</h2>
+    <div class=tags>${(profil.competences||[]).map(c=>'<span class=tag>'+c+'</span>').join('')}</div>
+  </div>
+  <div class=card>
+    <h2>Métiers ciblés</h2>
+    <div class=tags>${(profil.metiers||[]).map(m=>'<span class=tag>'+m+'</span>').join('')}</div>
+  </div>
+  <div class=footer>Profil généré par JobAssistant IA — jobassistant.monairbyte.eu</div>
+</div></body></html>`;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ANALYSE ATS CV ────────────────────────────────────────────────────────────
+app.post('/api/analyse-ats', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    // Top compétences demandées dans les offres
+    const topComps = await pool.query(`
+      SELECT unnest(tags) as comp, COUNT(*) as nb
+      FROM ja_jobs WHERE ia_score >= 50
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 20`);
+
+    const demandeesMarche = topComps.rows.map(r => r.comp.toLowerCase());
+    const competencesProfil = (profil.competences||[]).map(c => c.toLowerCase());
+
+    const manquantes = demandeesMarche.filter(c => !competencesProfil.some(p => p.includes(c) || c.includes(p)));
+    const presentes = demandeesMarche.filter(c => competencesProfil.some(p => p.includes(c) || c.includes(p)));
+    const score = Math.round(presentes.length / demandeesMarche.length * 100);
+
+    const prompt = `Tu es expert ATS et recrutement tech France. Analyse ce profil pour le marché IDF 2026:
+Profil: ${profil.titre}, ${profil.annees_experience} ans exp, certif: ${(profil.certifications||[]).join(', ')}
+Competences profil: ${competencesProfil.slice(0,20).join(', ')}
+Top 20 competences demandees sur le marche IDF: ${demandeesMarche.join(', ')}
+Competences manquantes vs marche: ${manquantes.slice(0,10).join(', ')}
+Score ATS actuel: ${score}%
+
+Donne:
+1. Score ATS /100 avec explication
+2. Top 5 competences a ajouter immediatement au CV
+3. Formulation optimale du titre pour passer les ATS
+4. 3 mots-cles critiques manquants
+5. Conseil pour le resume/accroche
+
+Sois direct et actionnable.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:prompt}]});
+    const analyse = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',e=>resolve('Erreur'));r.write(body);r.end();
+    });
+
+    res.json({ score, presentes, manquantes: manquantes.slice(0,10), analyse });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── MESSAGE LINKEDIN ──────────────────────────────────────────────────────────
+app.post('/api/jobs/:id/linkedin-message', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1',[req.params.id])).rows[0];
+    if(!job) return res.status(404).json({error:'Non trouvée'});
+
+    const prompt = `Génère un message LinkedIn court (4-5 lignes max) pour Mohamed Assalia Maiga qui postule chez ${job.company||'cette entreprise'} pour le poste "${job.title}". Profil: PO Data & IA, 9 ans Free Mobile/SFR/Orange, PSPO I PSM I, RAG/pgvector/Superset. Le message doit être naturel, pas commercial, montrer une vraie connaissance de l'entreprise et se terminer par une question ouverte. Commence directement par le message.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:200,messages:[{role:'user',content:prompt}]});
+    const message = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',e=>resolve('Erreur'));r.write(body);r.end();
+    });
+    res.json({ message });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── STATISTIQUES PERSONNELLES ─────────────────────────────────────────────────
+app.get('/api/stats/candidatures', async (req, res) => {
+  try {
+    const total = await pool.query('SELECT COUNT(*) as total FROM ja_candidatures');
+    const parStatut = await pool.query('SELECT statut, COUNT(*) as nb FROM ja_candidatures GROUP BY statut');
+    const tauxReponse = await pool.query(`SELECT COUNT(*) as nb FROM ja_candidatures WHERE statut != 'postule'`);
+    const relances = await pool.query(`SELECT COUNT(*) as nb FROM ja_candidatures WHERE statut='postule' AND date_postulation < NOW() - INTERVAL '7 days'`);
+    res.json({
+      total: parseInt(total.rows[0].total),
+      parStatut: parStatut.rows,
+      tauxReponse: total.rows[0].total > 0 ? Math.round(parseInt(tauxReponse.rows[0].nb)/parseInt(total.rows[0].total)*100) : 0,
+      aRelancer: parseInt(relances.rows[0].nb)
+    });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── MESSAGE FRANCE TRAVAIL ────────────────────────────────────────────────────
+app.post('/api/jobs/:id/ft-message', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1',[req.params.id])).rows[0];
+    if(!job) return res.status(404).json({error:'Non trouvée'});
+
+    const prompt = `Génère un message de candidature court et percutant (5-6 lignes max) pour le champ "Message au recruteur" sur France Travail. Candidat: Mohamed Assalia Maiga, Product Owner Data & IA, 9 ans Free Mobile/SFR/Orange, PSPO I PSM I, disponible immédiatement, Longjumeau 91. Poste: "${job.title}" chez ${job.company||'?'}. Le message doit être professionnel, montrer la valeur ajoutée immédiate et donner envie de lire le CV. Commence directement par le message, sans objet ni formule d'introduction.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:200,messages:[{role:'user',content:prompt}]});
+    const message = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',e=>resolve('Erreur'));r.write(body);r.end();
+    });
+    res.json({ message });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── UPLOAD CV PDF ─────────────────────────────────────────────────────────────
+const multer = require('multer');
+const upload = multer({ dest: '/tmp/uploads/' });
+
+app.post('/api/profil/upload-cv', upload.single('cv'), async (req, res) => {
+  try {
+    const fs = require('fs');
+    const { execSync } = require('child_process');
+    const filePath = req.file.path;
+
+    // Extraire texte du PDF
+    let cvText = '';
+    try {
+      cvText = execSync(`pdftotext "${filePath}" -`, { encoding: 'utf8', timeout: 15000 });
+    } catch(e) {
+      cvText = fs.readFileSync(filePath, 'utf8');
+    }
+    fs.unlinkSync(filePath);
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const prompt = `Analyse ce CV et extrait les informations en JSON exact:
+{
+  "nom": "...",
+  "titre": "...",
+  "annees_experience": nombre,
+  "competences": ["liste", "des", "competences", "techniques"],
+  "metiers": ["liste", "des", "metiers", "cibles"],
+  "certifications": ["liste"],
+  "localisation": "...",
+  "resume": "resume en 2 phrases"
+}
+CV: ${cvText.slice(0, 3000)}
+Retourne UNIQUEMENT le JSON, rien d'autre.`;
+
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]});
+    const result = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
+      r.on('error',()=>resolve(null));r.write(body);r.end();
+    });
+
+    const data = JSON.parse(result.replace(/```json|```/g,'').trim());
+    
+    // Mettre à jour le profil
+    await pool.query(`UPDATE ja_profil SET 
+      nom=COALESCE($1,nom), titre=COALESCE($2,titre), 
+      annees_experience=COALESCE($3,annees_experience),
+      competences=COALESCE($4,competences), metiers=COALESCE($5,metiers),
+      certifications=COALESCE($6,certifications), localisation=COALESCE($7,localisation),
+      resume=COALESCE($8,resume), updated_at=NOW()
+      WHERE id=(SELECT id FROM ja_profil ORDER BY id DESC LIMIT 1)`,
+      [data.nom, data.titre, data.annees_experience, data.competences, 
+       data.metiers, data.certifications, data.localisation, data.resume]);
+
+    res.json({ success: true, data });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── MATCH CV/OFFRE ────────────────────────────────────────────────────────────
+app.post('/api/jobs/:id/match-cv', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1',[req.params.id])).rows[0];
+    if(!job) return res.status(404).json({error:'Non trouvée'});
+
+    const prompt = `Analyse le match entre ce candidat et cette offre:
+CANDIDAT: ${profil.nom}, ${profil.titre}, ${profil.annees_experience} ans
+Competences: ${(profil.competences||[]).join(', ')}
+Certifications: ${(profil.certifications||[]).join(', ')}
+
+OFFRE: ${job.title} chez ${job.company||'?'}
+Description: ${(job.description||'').slice(0,600)}
+Tags: ${(job.tags||[]).join(', ')}
+
+Donne en JSON:
+{
+  "score_match": nombre 0-100,
+  "points_forts": ["liste 3 points forts du candidat pour ce poste"],
+  "points_faibles": ["liste 2-3 ecarts a combler"],
+  "conseil": "conseil en 1 phrase pour maximiser les chances",
+  "verdict": "POSTULER MAINTENANT / POSTULER / A SURVEILLER / PASSER"
+}
+Retourne UNIQUEMENT le JSON.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:500,messages:[{role:'user',content:prompt}]});
+    const result = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
+      r.on('error',()=>resolve(null));r.write(body);r.end();
+    });
+
+    const data = JSON.parse(result.replace(/```json|```/g,'').trim());
+    res.json(data);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── RELANCE EMAIL ─────────────────────────────────────────────────────────────
+app.post('/api/candidatures/:id/relance', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const cand = (await pool.query('SELECT * FROM ja_candidatures WHERE id=$1',[req.params.id])).rows[0];
+    if(!cand) return res.status(404).json({error:'Non trouvée'});
+
+    const prompt = `Génère un email de relance court et professionnel (5-6 lignes) pour Mohamed Assalia Maiga qui a postulé il y a 7+ jours pour "${cand.title}" chez ${cand.company||'?'}. Ton naturel, pas insistant, rappelle sa valeur ajoutée (PO Data & IA, 9 ans, PSPO I, disponible immédiatement). Commence par Objet: puis le corps du mail.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,messages:[{role:'user',content:prompt}]});
+    const email = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',()=>resolve('Erreur'));r.write(body);r.end();
+    });
+
+    // Marquer comme relancé
+    await pool.query("UPDATE ja_candidatures SET statut='relance' WHERE id=$1",[req.params.id]);
+    res.json({ email });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── HISTORIQUE RAPPORTS ───────────────────────────────────────────────────────
+app.get('/api/veille/historique', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT id, date_rapport, total_offres, nouvelles_offres, top_competences, top_entreprises, created_at FROM ja_veille_rapports ORDER BY created_at DESC LIMIT 10');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ENTREPRISES GÉOLOCALISÉES ─────────────────────────────────────────────────
+app.get('/api/stats/entreprises-map', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT company, location, COUNT(*) as nb_offres, ROUND(AVG(ia_score)) as score_moyen
+      FROM ja_jobs 
+      WHERE company IS NOT NULL AND company != '' AND ia_score >= 50
+      GROUP BY company, location
+      ORDER BY nb_offres DESC LIMIT 30`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── TENDANCES MARCHÉ ──────────────────────────────────────────────────────────
+app.get('/api/stats/tendances', async (req, res) => {
+  try {
+    const parJour = await pool.query(`
+      SELECT DATE(published_at) as date, COUNT(*) as nb
+      FROM ja_jobs WHERE published_at > NOW() - INTERVAL '30 days'
+      GROUP BY DATE(published_at) ORDER BY date DESC LIMIT 14`);
+    
+    const parMetier = await pool.query(`
+      SELECT CASE 
+        WHEN title ILIKE '%product owner%' THEN 'Product Owner'
+        WHEN title ILIKE '%moa%' OR title ILIKE '%maîtrise%' THEN 'MOA/AMOA'
+        WHEN title ILIKE '%data engineer%' THEN 'Data Engineer'
+        WHEN title ILIKE '%data analyst%' THEN 'Data Analyst'
+        WHEN title ILIKE '%business analyst%' THEN 'Business Analyst'
+        WHEN title ILIKE '%data scientist%' THEN 'Data Scientist'
+        ELSE 'Autre'
+      END as metier, COUNT(*) as nb
+      FROM ja_jobs WHERE ia_score >= 50
+      GROUP BY 1 ORDER BY 2 DESC`);
+
+    const parSource = await pool.query(`SELECT source, COUNT(*) as nb FROM ja_jobs GROUP BY source`);
+
+    res.json({ parJour: parJour.rows, parMetier: parMetier.rows, parSource: parSource.rows });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

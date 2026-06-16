@@ -34,6 +34,10 @@ const navItems = [
   {id:'cv',icon:<FileText size={18}/>,label:'Mon CV & Profil'},
   {id:'alertes',icon:<Bell size={18}/>,label:'Alertes'},
   {id:'parametres',icon:<Settings size={18}/>,label:'Paramètres'},
+  {id:'historique',icon:<FileText size={18}/>,label:'Historique rapports'},
+  {id:'tendances',icon:<Briefcase size={18}/>,label:'Tendances marche'},
+  {id:'portfolio',icon:<Star size={18}/>,label:'Portfolio projets'},
+  {id:'agenda',icon:<Bell size={18}/>,label:'Agenda recherche'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -64,6 +68,193 @@ const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
   </div>
 );
 
+
+const ScoreDetail = ({ offre }) => {
+  const [data, setData] = React.useState(null);
+  const [open, setOpen] = React.useState(false);
+  const load = async () => {
+    if(data){setOpen(!open);return;}
+    const r = await axios.get(API+'/jobs/'+offre.id+'/score-detail');
+    setData(r.data); setOpen(true);
+  };
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={load} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(59,130,246,0.2)',color:'#60a5fa',border:'1px solid rgba(59,130,246,0.3)'}}>
+        🔍 Voir le détail du score
+      </button>
+      {open && data && (
+        <div style={{...G.card,marginTop:8,background:'rgba(15,23,42,0.9)'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:10}}>Score: {data.total}% — Détail</div>
+          {data.details.map((d,i)=>(
+            <div key={i} style={{marginBottom:8}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                <span style={{fontSize:12,color:'#94a3b8'}}>{d.critere}</span>
+                <span style={{fontSize:12,fontWeight:700,color:d.points>0?'#22c55e':'#ef4444'}}>{d.points}/{d.max} pts</span>
+              </div>
+              <div style={{height:5,background:'rgba(30,41,59,0.8)',borderRadius:3,marginBottom:3}}>
+                <div style={{height:5,width:(d.points/d.max*100)+'%',background:d.points>0?'#22c55e':'#ef4444',borderRadius:3}}/>
+              </div>
+              <div style={{fontSize:10,color:'#475569'}}>{d.detail}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PitchIA = ({ offre }) => {
+  const [pitch, setPitch] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const generer = async () => {
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/pitch');
+    setPitch(r.data.pitch||'');
+    setLoading(false);
+  };
+  const copier = () => { navigator.clipboard.writeText(pitch); setCopied(true); setTimeout(()=>setCopied(false),2000); };
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(245,158,11,0.2)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.3)'}}>
+        {loading?'Génération...':'⚡ Générer mon pitch (3 lignes)'}
+      </button>
+      {pitch && (
+        <div style={{...G.card,marginTop:8,background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.2)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <span style={{fontSize:13,fontWeight:600,color:'#f59e0b'}}>⚡ Mon pitch</span>
+            <button onClick={copier} style={{...G.btn,padding:'3px 10px',fontSize:11,background:copied?'rgba(34,197,94,0.2)':'rgba(245,158,11,0.2)',color:copied?'#22c55e':'#f59e0b'}}>{copied?'Copié!':'Copier'}</button>
+          </div>
+          <div style={{fontSize:12,color:'#e2e8f0',lineHeight:1.7}}>{pitch}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const MatchCV = ({ offre }) => {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const generer = async () => {
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/match-cv');
+    setData(r.data);
+    setLoading(false);
+  };
+  const verdictColor = {'POSTULER MAINTENANT':'#22c55e','POSTULER':'#10b981','A SURVEILLER':'#f59e0b','PASSER':'#ef4444'};
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(16,185,129,0.15)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>
+        {loading?'Analyse...':'🎯 Analyser mon match CV/Offre'}
+      </button>
+      {data && (
+        <div style={{...G.card,marginTop:8,background:'rgba(16,185,129,0.05)',border:'1px solid rgba(16,185,129,0.2)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+            <span style={{fontSize:13,fontWeight:700,color:'#10b981'}}>Match: {data.score_match}%</span>
+            <span style={{background:(verdictColor[data.verdict]||'#64748b')+'20',color:verdictColor[data.verdict]||'#64748b',padding:'3px 10px',borderRadius:8,fontSize:11,fontWeight:700}}>{data.verdict}</span>
+          </div>
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:11,color:'#22c55e',fontWeight:600,marginBottom:4}}>Points forts:</div>
+            {(data.points_forts||[]).map((p,i)=><div key={i} style={{fontSize:11,color:'#94a3b8',marginBottom:2}}>✅ {p}</div>)}
+          </div>
+          <div style={{marginBottom:8}}>
+            <div style={{fontSize:11,color:'#f59e0b',fontWeight:600,marginBottom:4}}>A ameliorer:</div>
+            {(data.points_faibles||[]).map((p,i)=><div key={i} style={{fontSize:11,color:'#94a3b8',marginBottom:2}}>⚠️ {p}</div>)}
+          </div>
+          <div style={{fontSize:11,color:'#60a5fa',fontStyle:'italic'}}>{data.conseil}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FranceTravailMessage = ({ offre }) => {
+  const [msg, setMsg] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const generer = async () => {
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/ft-message');
+    setMsg(r.data.message||'');
+    setLoading(false);
+  };
+  const copier = () => { navigator.clipboard.writeText(msg); setCopied(true); setTimeout(()=>setCopied(false),2000); };
+  if(offre.source !== 'France Travail') return null;
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(239,68,68,0.15)',color:'#f87171',border:'1px solid rgba(239,68,68,0.3)'}}>
+        {loading?'Generation...':'🇫🇷 Message candidature France Travail'}
+      </button>
+      {msg && (
+        <div style={{...G.card,marginTop:8,background:'rgba(239,68,68,0.05)',border:'1px solid rgba(239,68,68,0.2)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <span style={{fontSize:13,fontWeight:600,color:'#f87171'}}>🇫🇷 Message France Travail</span>
+            <button onClick={copier} style={{...G.btn,padding:'3px 10px',fontSize:11,background:copied?'rgba(34,197,94,0.2)':'rgba(239,68,68,0.2)',color:copied?'#22c55e':'#f87171'}}>{copied?'Copie!':'Copier'}</button>
+          </div>
+          <div style={{fontSize:12,color:'#e2e8f0',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{msg}</div>
+          {offre.url && <a href={offre.url} target="_blank" rel="noopener noreferrer" style={{...G.btn,marginTop:8,padding:'6px 14px',fontSize:12,background:'rgba(239,68,68,0.2)',color:'#f87171',border:'1px solid rgba(239,68,68,0.3)',textDecoration:'none',display:'inline-flex'}}>Postuler sur France Travail</a>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const LinkedInMessage = ({ offre }) => {
+  const [msg, setMsg] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [copied, setCopied] = React.useState(false);
+  const generer = async () => {
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/linkedin-message');
+    setMsg(r.data.message||'');
+    setLoading(false);
+  };
+  const copier = () => { navigator.clipboard.writeText(msg); setCopied(true); setTimeout(()=>setCopied(false),2000); };
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(59,130,246,0.2)',color:'#60a5fa',border:'1px solid rgba(59,130,246,0.3)'}}>
+        {loading?'Generation...':'💼 Message LinkedIn recruteur'}
+      </button>
+      {msg && (
+        <div style={{...G.card,marginTop:8,background:'rgba(59,130,246,0.05)',border:'1px solid rgba(59,130,246,0.2)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <span style={{fontSize:13,fontWeight:600,color:'#60a5fa'}}>💼 Message LinkedIn</span>
+            <button onClick={copier} style={{...G.btn,padding:'3px 10px',fontSize:11,background:copied?'rgba(34,197,94,0.2)':'rgba(59,130,246,0.2)',color:copied?'#22c55e':'#60a5fa'}}>{copied?'Copie!':'Copier'}</button>
+          </div>
+          <div style={{fontSize:12,color:'#e2e8f0',lineHeight:1.7,whiteSpace:'pre-wrap'}}>{msg}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const EntretienIA = ({ offre }) => {
+  const [questions, setQuestions] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const generer = async () => {
+    if(questions){setOpen(!open);return;}
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/entretien');
+    setQuestions(r.data.questions||'');
+    setOpen(true);
+    setLoading(false);
+  };
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(16,185,129,0.2)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>
+        {loading?'Génération...':'🎯 Préparer mon entretien (5 questions)'}
+      </button>
+      {open && questions && (
+        <div style={{...G.card,marginTop:8,background:'rgba(16,185,129,0.05)',border:'1px solid rgba(16,185,129,0.2)'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'#10b981',marginBottom:8}}>🎯 Préparation entretien</div>
+          <div style={{fontSize:12,color:'#94a3b8',lineHeight:1.8,whiteSpace:'pre-wrap'}}>{questions}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const LettreMotivationIA = ({ offre }) => {
   const [lettre, setLettre] = React.useState('');
   const [loading, setLoading] = React.useState(false);
@@ -93,7 +284,7 @@ const LettreMotivationIA = ({ offre }) => {
   );
 };
 
-const OffresPage = ({ profil, favoris, setFavoris, onPostuler }) => {
+const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -144,6 +335,12 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler }) => {
           <button onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px'}}><Send size={14}/> Postuler</button>
           {detail.url&&<a href={detail.url} target="_blank" rel="noopener noreferrer" onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px',background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',textDecoration:'none'}}><ExternalLink size={14}/> Voir offre</a>}
         </div>
+        <MatchCV offre={detail}/>
+        <ScoreDetail offre={detail}/>
+        <PitchIA offre={detail}/>
+        <EntretienIA offre={detail}/>
+        <FranceTravailMessage offre={detail}/>
+        <LinkedInMessage offre={detail}/>
         <LettreMotivationIA offre={detail}/>
       </div>
     </div>
@@ -199,7 +396,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler }) => {
             <div style={{fontSize:11,color:'#475569'}}>{job.published_at?new Date(job.published_at).toLocaleDateString('fr-FR'):''} · via {job.source}</div>
             <div style={{display:'flex',gap:8}} onClick={e=>e.stopPropagation()}>
               <button onClick={()=>toggleFavori(job)} style={{background:'transparent',border:'none',cursor:'pointer',color:favoris.includes(job.id)?'#f59e0b':'#334155'}}>★</button>
-              <button onClick={()=>onPostuler(job)} style={{...G.btn,padding:'6px 14px',fontSize:12}}><Send size={12}/> Postuler</button>
+              <button onClick={()=>onPostuler(job)} style={{...G.btn,padding:'6px 14px',fontSize:12,background:postules.includes(job.id)?'rgba(34,197,94,0.3)':'linear-gradient(135deg,#8b5cf6,#3b82f6)',color:postules.includes(job.id)?'#22c55e':'#fff'}}><Send size={12}/> {postules.includes(job.id)?'Postule !':'Postuler'}</button>
               {job.url&&<a href={job.url} target="_blank" rel="noopener noreferrer" onClick={()=>onPostuler(job)} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',textDecoration:'none'}}><ExternalLink size={12}/> Voir</a>}
             </div>
           </div>
@@ -280,24 +477,67 @@ const FavorisPage = ({ onPostuler }) => {
 
 const CVPage = ({ profil, setProfil }) => {
   const [editing, setEditing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const uploadCV = async (e) => {
+    const file = e.target.files[0];
+    if(!file) return;
+    setUploading(true);
+    const form = new FormData();
+    form.append('cv', file);
+    try {
+      const r = await axios.post(API+'/profil/upload-cv', form, {headers:{'Content-Type':'multipart/form-data'}});
+      alert('CV analyse ! ' + (r.data.data.competences||[]).length + ' competences extraites.');
+      window.location.reload();
+    } catch(e) { alert('Erreur: '+e.message); }
+    setUploading(false);
+  };
   const [form, setForm] = useState({});
   const [newComp, setNewComp] = useState('');
   useEffect(()=>{if(profil)setForm(profil);},[profil]);
   const save = async () => { const r=await axios.put(API+'/profil',form); setProfil(r.data); setEditing(false); };
   const addComp = async () => { if(!newComp.trim())return; const r=await axios.post(API+'/profil/competence',{competence:newComp.trim()}); setProfil(p=>({...p,competences:r.data.competences})); setNewComp(''); };
   const removeComp = async (c) => { const r=await axios.delete(API+'/profil/competence',{data:{competence:c}}); setProfil(p=>({...p,competences:r.data.competences})); };
+  const [ats, setAts] = React.useState(null);
+  const [atsLoading, setAtsLoading] = React.useState(false);
+  const analyserATS = async () => {
+    setAtsLoading(true);
+    const r = await axios.post(API+'/analyse-ats');
+    setAts(r.data);
+    setAtsLoading(false);
+  };
   if(!profil) return <div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Profil non disponible</div>;
   return (
     <div>
       <div style={{...G.card,marginBottom:12}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
           <div style={{fontSize:15,fontWeight:700,color:'#fff'}}>{profil.nom}</div>
-          <button onClick={()=>setEditing(!editing)} style={{...G.btn,padding:'6px 14px',fontSize:12}}>{editing?'Annuler':'Modifier'}</button>
+          <div style={{display:'flex',gap:8}}>
+            <label style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(59,130,246,0.2)',color:'#60a5fa',border:'1px solid rgba(59,130,246,0.3)',cursor:'pointer'}}>
+              {uploading?'Analyse...':'📤 Upload CV'}
+              <input type="file" accept=".pdf" onChange={uploadCV} style={{display:'none'}}/>
+            </label>
+            <button onClick={()=>window.open(API+'/profil/cv-pdf','_blank')} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(34,197,94,0.2)',color:'#22c55e',border:'1px solid rgba(34,197,94,0.3)'}}>📄 CV PDF</button>
+            <button onClick={analyserATS} disabled={atsLoading} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(245,158,11,0.2)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.3)'}}>🎯 {atsLoading?'Analyse...':'Score ATS'}</button>
+            <button onClick={()=>setEditing(!editing)} style={{...G.btn,padding:'6px 14px',fontSize:12}}>{editing?'Annuler':'Modifier'}</button>
+          </div>
         </div>
         {editing?<div>
           <input value={form.titre||''} onChange={e=>setForm({...form,titre:e.target.value})} placeholder="Titre" style={{...G.inp,marginBottom:8}}/>
           <button onClick={save} style={{...G.btn,padding:'8px 16px',fontSize:12}}>Sauvegarder</button>
         </div>:<div style={{fontSize:13,color:'#94a3b8'}}>{profil.titre}</div>}
+        {ats && (
+          <div style={{marginTop:12,padding:12,background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.2)',borderRadius:8}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+              <span style={{fontSize:13,fontWeight:700,color:'#f59e0b'}}>Score ATS: {ats.score}%</span>
+              <span style={{fontSize:11,color:'#64748b'}}>{ats.presentes?.length} / 20 competences</span>
+            </div>
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:11,color:'#ef4444',fontWeight:600,marginBottom:4}}>Manquantes:</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:4}}>{(ats.manquantes||[]).map(c=><span key={c} style={{background:'rgba(239,68,68,0.1)',color:'#f87171',border:'1px solid rgba(239,68,68,0.2)',borderRadius:4,padding:'2px 6px',fontSize:10}}>{c}</span>)}</div>
+            </div>
+            <div style={{fontSize:12,color:'#94a3b8',lineHeight:1.7,whiteSpace:'pre-wrap',marginTop:8}}>{ats.analyse}</div>
+          </div>
+        )}
       </div>
       <div style={{...G.card,marginBottom:12}}>
         <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:10}}>Competences ({(profil.competences||[]).length})</div>
@@ -339,6 +579,247 @@ const AlertesPage = () => {
         <button onClick={()=>del(a.id)} style={{background:'transparent',border:'none',color:'#ef4444',cursor:'pointer'}}><Trash2 size={14}/></button>
       </div>)}
       {alertes.length===0&&!showForm&&<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune alerte</div>}
+    </div>
+  );
+};
+
+const PortfolioPage = () => {
+  const projets = [
+    {
+      nom:'JobAssistant IA', url:'https://jobassistant.monairbyte.eu',
+      desc:'Plateforme de matching emploi avec IA — collecte automatique France Travail/Indeed, scoring IA, lettre de motivation, veille marche quotidienne.',
+      stack:['React','Node.js','PostgreSQL','Claude IA','France Travail API','Docker'],
+      impact:'581+ offres analysees · Rapport IA quotidien · Score matching personnalise',
+      color:'#8b5cf6', emoji:'🎯'
+    },
+    {
+      nom:'DocTracker', url:'https://doctracker.monairbyte.eu',
+      desc:'SaaS de tracking documentaire forensique — OTP/PIN, watermark dynamique, tracking sessions temps reel, rapport PDF forensique.',
+      stack:['React','Node.js','PostgreSQL','OpenAI API','Docker'],
+      impact:'Tracking comportemental · Score risque · Export forensique PDF',
+      color:'#3b82f6', emoji:'🔍'
+    },
+    {
+      nom:'BI Stack Association', url:'https://app.monairbyte.eu',
+      desc:'Plateforme digitale 5 modules pour 150+ residents — Analytics, RAG/IA documentaire, CivicTech, Gestion collaborative.',
+      stack:['React','Apache Superset','pgvector','OpenAI API','n8n','LangChain'],
+      impact:'150+ residents · Architecture RAG operationnelle · Headless BI',
+      color:'#10b981', emoji:'🏢'
+    },
+    {
+      nom:'AdminIA', url:'https://adminia.monairbyte.eu',
+      desc:'SaaS multi-tenant avec analyse PDF par IA, JWT auth, GPT-4o-mini integration.',
+      stack:['React','Node.js','OpenAI GPT-4o','JWT','Docker'],
+      impact:'Multi-tenant · Analyse PDF IA · Auth securisee',
+      color:'#f59e0b', emoji:'🤖'
+    },
+  ];
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:16,background:'linear-gradient(135deg,rgba(139,92,246,0.15),rgba(59,130,246,0.08))',border:'1px solid rgba(139,92,246,0.3)'}}>
+        <div style={{fontSize:15,fontWeight:800,color:'#fff',marginBottom:4}}>Mohamed Assalia Maiga</div>
+        <div style={{fontSize:12,color:'#a78bfa',marginBottom:8}}>Product Owner Data & IA · Full Stack Builder · 9 ans exp</div>
+        <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+          {['PSPO I','PSM I','RAG/pgvector','Apache Superset','Docker','n8n'].map(t=><span key={t} style={G.tag}>{t}</span>)}
+        </div>
+      </div>
+      {projets.map((p,i)=>(
+        <div key={i} style={{...G.card,marginBottom:12,borderLeft:'3px solid '+p.color}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+            <div>
+              <div style={{fontSize:15,fontWeight:800,color:'#fff'}}>{p.emoji} {p.nom}</div>
+              <div style={{fontSize:11,color:'#64748b',marginTop:2}}>{p.impact}</div>
+            </div>
+            <a href={p.url} target="_blank" rel="noopener noreferrer" style={{...G.btn,padding:'4px 10px',fontSize:11,background:p.color+'20',color:p.color,border:'1px solid '+p.color+'50',textDecoration:'none'}}>Voir</a>
+          </div>
+          <p style={{fontSize:12,color:'#94a3b8',lineHeight:1.6,marginBottom:8}}>{p.desc}</p>
+          <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+            {p.stack.map(t=><span key={t} style={{...G.tag,fontSize:10}}>{t}</span>)}
+          </div>
+        </div>
+      ))}
+      <div style={{...G.card,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#a78bfa',marginBottom:6}}>GitHub</div>
+        <a href="https://github.com/mamaiga1987" target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:'#60a5fa'}}>github.com/mamaiga1987</a>
+      </div>
+    </div>
+  );
+};
+
+const AgendaPage = () => {
+  const [candidatures, setCandidatures] = React.useState([]);
+  const [stats, setStats] = React.useState(null);
+  React.useEffect(()=>{
+    axios.get(API+'/candidatures').then(r=>setCandidatures(r.data));
+    axios.get(API+'/stats/candidatures').then(r=>setStats(r.data));
+  },[]);
+
+  const today = new Date();
+  const jourSemaine = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'][today.getDay()];
+  
+  const agenda = [
+    {jour:'Lundi',action:'Postuler aux nouvelles offres 80%+',type:'offres',color:'#8b5cf6'},
+    {jour:'Mardi',action:'Relancer candidatures sans reponse +7j',type:'relance',color:'#f59e0b'},
+    {jour:'Mercredi',action:'Mettre a jour profil LinkedIn et CV',type:'profil',color:'#3b82f6'},
+    {jour:'Jeudi',action:'Postuler offres 70%+ non encore traitees',type:'offres',color:'#8b5cf6'},
+    {jour:'Vendredi',action:'Bilan semaine + preparer entretiens',type:'bilan',color:'#10b981'},
+  ];
+
+  const aRelancer = candidatures.filter(c=>c.statut==='postule'&&Math.floor((Date.now()-new Date(c.date_postulation))/86400000)>=7);
+
+  return (
+    <div>
+      {stats && (
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>
+          <div style={{...G.card,textAlign:'center',padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:'#8b5cf6'}}>{stats.total}</div>
+            <div style={{fontSize:10,color:'#64748b'}}>Candidatures</div>
+          </div>
+          <div style={{...G.card,textAlign:'center',padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:'#10b981'}}>{stats.tauxReponse}%</div>
+            <div style={{fontSize:10,color:'#64748b'}}>Taux reponse</div>
+          </div>
+          <div style={{...G.card,textAlign:'center',padding:12}}>
+            <div style={{fontSize:22,fontWeight:800,color:'#f59e0b'}}>{stats.aRelancer}</div>
+            <div style={{fontSize:10,color:'#64748b'}}>A relancer</div>
+          </div>
+        </div>
+      )}
+
+      <div style={{...G.card,marginBottom:12,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#a78bfa',marginBottom:4}}>Aujourd'hui — {jourSemaine}</div>
+        <div style={{fontSize:12,color:'#e2e8f0'}}>{agenda.find(a=>a.jour===jourSemaine)?.action||'Bon week-end ! Reposez-vous.'}</div>
+      </div>
+
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:10}}>Planning semaine</div>
+        {agenda.map((a,i)=>(
+          <div key={i} style={{display:'flex',gap:10,alignItems:'center',padding:'8px 0',borderBottom:'1px solid rgba(139,92,246,0.08)'}}>
+            <div style={{width:80,fontSize:11,fontWeight:700,color:a.jour===jourSemaine?a.color:'#64748b'}}>{a.jour}</div>
+            <div style={{flex:1,fontSize:12,color:a.jour===jourSemaine?'#e2e8f0':'#64748b'}}>{a.action}</div>
+            {a.jour===jourSemaine&&<div style={{width:8,height:8,borderRadius:'50%',background:a.color}}/>}
+          </div>
+        ))}
+      </div>
+
+      {aRelancer.length>0&&(
+        <div style={{...G.card,background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#f59e0b',marginBottom:8}}>A relancer maintenant ({aRelancer.length})</div>
+          {aRelancer.map(c=>(
+            <div key={c.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid rgba(245,158,11,0.1)'}}>
+              <div>
+                <div style={{fontSize:12,fontWeight:600,color:'#e2e8f0'}}>{c.title}</div>
+                <div style={{fontSize:10,color:'#94a3b8'}}>{c.company}</div>
+              </div>
+              <button onClick={async()=>{const r=await axios.post(API+'/candidatures/'+c.id+'/relance');alert(r.data.email);}} style={{...G.btn,padding:'4px 10px',fontSize:11,background:'rgba(245,158,11,0.2)',color:'#f59e0b'}}>Generer relance</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const TendancesPage = () => {
+  const [data, setData] = React.useState(null);
+  const [entreprises, setEntreprises] = React.useState([]);
+  React.useEffect(()=>{
+    axios.get(API+'/stats/tendances').then(r=>setData(r.data));
+    axios.get(API+'/stats/entreprises-map').then(r=>setEntreprises(r.data));
+  },[]);
+  if(!data) return <div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Chargement...</div>;
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:12}}>Repartition par metier</div>
+        {(data.parMetier||[]).filter(m=>m.metier!=='Autre').map((m,i)=>{
+          const colors=['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ec4899','#06b6d4'];
+          const max = Math.max(...data.parMetier.filter(x=>x.metier!=='Autre').map(x=>parseInt(x.nb)));
+          return (
+            <div key={i} style={{marginBottom:8}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                <span style={{fontSize:11,color:'#94a3b8'}}>{m.metier}</span>
+                <span style={{fontSize:11,color:colors[i%colors.length],fontWeight:700}}>{m.nb} offres</span>
+              </div>
+              <div style={{height:6,background:'rgba(30,41,59,0.8)',borderRadius:3}}>
+                <div style={{height:6,width:(parseInt(m.nb)/max*100)+'%',background:colors[i%colors.length],borderRadius:3}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:12}}>Sources des offres</div>
+        {(data.parSource||[]).map((s,i)=>(
+          <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'8px 0',borderBottom:'1px solid rgba(139,92,246,0.1)'}}>
+            <span style={{fontSize:12,color:'#94a3b8'}}>{s.source}</span>
+            <span style={{fontSize:12,color:'#a78bfa',fontWeight:700}}>{s.nb} offres</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:12}}>Top entreprises actives</div>
+        {entreprises.slice(0,15).map((e,i)=>(
+          <div key={i} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 0',borderBottom:'1px solid rgba(139,92,246,0.08)'}}>
+            <div>
+              <div style={{fontSize:12,fontWeight:600,color:'#e2e8f0'}}>{e.company}</div>
+              <div style={{fontSize:10,color:'#475569'}}>{e.location}</div>
+            </div>
+            <div style={{textAlign:'right'}}>
+              <div style={{fontSize:12,color:'#a78bfa',fontWeight:700}}>{e.nb_offres} postes</div>
+              <div style={{fontSize:10,color:'#64748b'}}>score moy: {e.score_moyen}%</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{...G.card}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:12}}>Activite des 14 derniers jours</div>
+        <ResponsiveContainer width="100%" height={150}>
+          <LineChart data={(data.parJour||[]).reverse()}>
+            <XAxis dataKey="date" tick={{fontSize:9,fill:'#64748b'}} axisLine={false} tickLine={false} tickFormatter={v=>{if(!v)return '';const d=new Date(v);return (d.getMonth()+1)+'/'+(d.getDate());}}/>
+            <Tooltip contentStyle={{background:'#0f172a',border:'1px solid #8b5cf6',borderRadius:8,fontSize:10}}/>
+            <Line type="monotone" dataKey="nb" stroke="#8b5cf6" strokeWidth={2} dot={false} name="Offres"/>
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
+const HistoriquePage = () => {
+  const [rapports, setRapports] = React.useState([]);
+  const [selected, setSelected] = React.useState(null);
+  React.useEffect(()=>{axios.get(API+'/veille/historique').then(r=>setRapports(r.data));},[]);
+  return (
+    <div>
+      <div style={{fontSize:13,color:'#64748b',marginBottom:12}}>Derniers rapports de veille marche</div>
+      {rapports.length===0&&<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucun rapport disponible</div>}
+      {rapports.map((r,i)=>(
+        <div key={r.id} style={{...G.card,marginBottom:10,cursor:'pointer',borderLeft:selected===i?'3px solid #8b5cf6':'3px solid transparent'}} onClick={()=>setSelected(selected===i?null:i)}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:'#fff'}}>{new Date(r.created_at).toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})}</div>
+              <div style={{fontSize:11,color:'#64748b',marginTop:2}}>{r.total_offres} offres analysees · {r.nouvelles_offres} nouvelles</div>
+            </div>
+            <div style={{fontSize:20,color:'#8b5cf6'}}>{selected===i?'▲':'▼'}</div>
+          </div>
+          {selected===i&&(
+            <div style={{marginTop:12}}>
+              <div style={{fontSize:12,fontWeight:600,color:'#a78bfa',marginBottom:6}}>Top Competences</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:10}}>
+                {(r.top_competences||[]).slice(0,5).map((c,j)=><span key={j} style={G.tag}>{c}</span>)}
+              </div>
+              <div style={{fontSize:12,fontWeight:600,color:'#a78bfa',marginBottom:6}}>Top Entreprises</div>
+              <div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+                {(r.top_entreprises||[]).slice(0,5).map((e,j)=><span key={j} style={{...G.tag,color:'#10b981',background:'rgba(16,185,129,0.1)',border:'1px solid rgba(16,185,129,0.2)'}}>{e}</span>)}
+              </div>
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   );
 };
@@ -481,6 +962,36 @@ const Dashboard = ({ stats, profil, setActive }) => {
           </div>
         ))}
       </div>
+      <div style={{...G.card,marginBottom:12}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#fff',marginBottom:10}}>Salaire marche IDF (estimation)</div>
+        {[
+          {metier:'Product Owner Data/IA',min:52,max:70,color:'#8b5cf6'},
+          {metier:'MOA/AMOA Senior',min:48,max:65,color:'#3b82f6'},
+          {metier:'Data Engineer',min:50,max:68,color:'#10b981'},
+          {metier:'Analytics Engineer',min:48,max:65,color:'#f59e0b'},
+          {metier:'Data Analyst Senior',min:42,max:58,color:'#ec4899'},
+        ].map((s,i)=>(
+          <div key={i} style={{marginBottom:8}}>
+            <div style={{display:'flex',justifyContent:'space-between',marginBottom:2}}>
+              <span style={{fontSize:11,color:'#94a3b8'}}>{s.metier}</span>
+              <span style={{fontSize:11,color:s.color,fontWeight:700}}>{s.min}k - {s.max}k EUR</span>
+            </div>
+            <div style={{height:5,background:'rgba(30,41,59,0.8)',borderRadius:3}}>
+              <div style={{height:5,width:((s.max-35)/(75-35)*100)+'%',background:s.color,borderRadius:3}}/>
+            </div>
+          </div>
+        ))}
+        <div style={{fontSize:10,color:'#475569',marginTop:6}}>Votre cible: 52-65k EUR — alignee marche</div>
+      </div>
+      <div style={{...G.card,marginBottom:12,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#a78bfa',marginBottom:6}}>Partager mon profil</div>
+        <div style={{fontSize:11,color:'#64748b',marginBottom:8}}>Page publique a envoyer aux recruteurs</div>
+        <div style={{display:'flex',gap:8}}>
+          <input readOnly value="https://jobassistant.monairbyte.eu/profil" style={{...G.inp,flex:1,fontSize:11,color:'#a78bfa'}}/>
+          <button onClick={()=>{navigator.clipboard.writeText('https://jobassistant.monairbyte.eu/profil');alert('Lien copie !');}} style={{...G.btn,padding:'6px 12px',fontSize:11}}>Copier</button>
+          <button onClick={()=>window.open('https://jobassistant.monairbyte.eu/profil','_blank')} style={{...G.btn,padding:'6px 12px',fontSize:11,background:'rgba(139,92,246,0.2)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)'}}>Voir</button>
+        </div>
+      </div>
       <button onClick={sendRapport} disabled={sending} style={{...G.btn,width:'100%',padding:'12px',fontSize:13,background:'linear-gradient(135deg,#1e3a5f,#2d6a9f)',marginBottom:10}}>
         {sending?'Envoi en cours...':'Envoyer le rapport maintenant'}
       </button>
@@ -519,17 +1030,28 @@ export default function App() {
     axios.get(API+'/stats').then(r=>setStats(r.data)).catch(()=>{});
     axios.get(API+'/favoris').then(r=>setFavoris((r.data||[]).map(f=>f.job_id))).catch(()=>{});
   },[]);
-  const onPostuler = async (job) => { try { await axios.post(API+'/candidatures',{job_id:job.id,title:job.title,company:job.company,url:job.url}); } catch(e){} };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres'};
+  const [postules, setPostules] = useState([]);
+  const onPostuler = async (job) => {
+    try {
+      await axios.post(API+'/candidatures',{job_id:job.id,title:job.title,company:job.company,url:job.url});
+      setPostules(p=>[...p,job.id]);
+      alert('Candidature enregistree pour: '+job.title);
+    } catch(e){ alert('Erreur: '+e.message); }
+  };
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche'};
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
-      case 'offres': return <OffresPage profil={profil} favoris={favoris} setFavoris={setFavoris} onPostuler={onPostuler}/>;
+      case 'offres': return <OffresPage profil={profil} favoris={favoris} setFavoris={setFavoris} onPostuler={onPostuler} postules={postules}/>;
       case 'candidatures': return <CandidaturesPage/>;
       case 'favoris': return <FavorisPage onPostuler={onPostuler}/>;
       case 'cv': return <CVPage profil={profil} setProfil={setProfil}/>;
       case 'alertes': return <AlertesPage/>;
       case 'parametres': return <ParametresPage/>;
+      case 'historique': return <HistoriquePage key={Date.now()}/>;
+      case 'tendances': return <TendancesPage key={Date.now()}/>;
+      case 'portfolio': return <PortfolioPage key={Date.now()}/>;
+      case 'agenda': return <AgendaPage key={Date.now()}/>;
       default: return null;
     }
   };

@@ -38,6 +38,7 @@ const navItems = [
   {id:'tendances',icon:<Briefcase size={18}/>,label:'Tendances marche'},
   {id:'portfolio',icon:<Star size={18}/>,label:'Portfolio projets'},
   {id:'agenda',icon:<Bell size={18}/>,label:'Agenda recherche'},
+  {id:'blacklist',icon:<X size={18}/>,label:'Blacklist entreprises'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -126,6 +127,58 @@ const PitchIA = ({ offre }) => {
             <button onClick={copier} style={{...G.btn,padding:'3px 10px',fontSize:11,background:copied?'rgba(34,197,94,0.2)':'rgba(245,158,11,0.2)',color:copied?'#22c55e':'#f59e0b'}}>{copied?'Copié!':'Copier'}</button>
           </div>
           <div style={{fontSize:12,color:'#e2e8f0',lineHeight:1.7}}>{pitch}</div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const FicheEntreprise = ({ offre }) => {
+  const [fiche, setFiche] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const charger = async () => {
+    if(fiche){setOpen(!open);return;}
+    if(!offre.company){alert('Entreprise non renseignee');return;}
+    setLoading(true);
+    const r = await axios.get(API+'/entreprise/'+encodeURIComponent(offre.company));
+    setFiche(r.data); setOpen(true); setLoading(false);
+  };
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={charger} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(6,182,212,0.2)',color:'#06b6d4',border:'1px solid rgba(6,182,212,0.3)'}}>
+        {loading?'Chargement...':'🏢 Fiche entreprise IA'}
+      </button>
+      {open && fiche && (
+        <div style={{...G.card,marginTop:8,background:'rgba(6,182,212,0.05)',border:'1px solid rgba(6,182,212,0.2)'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'#06b6d4',marginBottom:8}}>🏢 {fiche.nom}</div>
+          <div style={{fontSize:12,color:'#94a3b8',lineHeight:1.7,whiteSpace:'pre-wrap',marginBottom:8}}>{fiche.fiche}</div>
+          {fiche.offres?.length>0&&<div style={{fontSize:11,color:'#64748b'}}>{fiche.offres.length} offre(s) active(s) chez cet employeur</div>}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const ReponsesSTAR = ({ offre }) => {
+  const [data, setData] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [open, setOpen] = React.useState(false);
+  const generer = async () => {
+    if(data){setOpen(!open);return;}
+    setLoading(true);
+    const r = await axios.post(API+'/jobs/'+offre.id+'/reponses-star');
+    setData(r.data.reponses||''); setOpen(true); setLoading(false);
+  };
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(245,158,11,0.15)',color:'#fbbf24',border:'1px solid rgba(245,158,11,0.3)'}}>
+        {loading?'Generation...':'⭐ Reponses STAR pour cet entretien'}
+      </button>
+      {open && data && (
+        <div style={{...G.card,marginTop:8,background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.2)'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'#fbbf24',marginBottom:8}}>⭐ Methode STAR</div>
+          <div style={{fontSize:12,color:'#94a3b8',lineHeight:1.8,whiteSpace:'pre-wrap'}}>{data}</div>
         </div>
       )}
     </div>
@@ -411,6 +464,8 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
           <button onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px'}}><Send size={14}/> Postuler</button>
           {detail.url&&<a href={detail.url} target="_blank" rel="noopener noreferrer" onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px',background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',textDecoration:'none'}}><ExternalLink size={14}/> Voir offre</a>}
         </div>
+        <FicheEntreprise offre={detail}/>
+        <ReponsesSTAR offre={detail}/>
         <MatchCV offre={detail}/>
         <ScoreDetail offre={detail}/>
         <PitchIA offre={detail}/>
@@ -506,14 +561,50 @@ const CandidaturesPage = () => {
   const aRelancer = (c) => c.statut==='postule'&&Math.floor((Date.now()-new Date(c.date_postulation))/86400000)>=7;
   const nbRelance = candidatures.filter(aRelancer).length;
   const exportCSV = () => window.open(API+'/candidatures/export','_blank');
+  const [showManuel, setShowManuel] = React.useState(false);
+  const [formManuel, setFormManuel] = React.useState({title:'',company:'',url:'',contact_rh:'',contact_linkedin:'',contact_email:'',notes:'',source_candidature:'LinkedIn',motivation_score:3});
+  const addManuel = async () => {
+    if(!formManuel.title||!formManuel.company) return alert('Titre et entreprise requis');
+    const r = await axios.post(API+'/candidatures/manuelle', formManuel);
+    setCandidatures(c=>[r.data,...c]);
+    setFormManuel({title:'',company:'',url:'',contact_rh:'',contact_linkedin:'',contact_email:'',notes:'',source_candidature:'LinkedIn',motivation_score:3});
+    setShowManuel(false);
+  };
   return (
     <div>
       <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:8,marginBottom:12}}>
         {STATUTS.map(s=><div key={s.id} style={{...G.card,padding:10,textAlign:'center',borderTop:'3px solid '+s.color}}><div style={{fontSize:20,fontWeight:800,color:s.color}}>{candidatures.filter(c=>c.statut===s.id).length}</div><div style={{fontSize:11,color:'#94a3b8'}}>{s.emoji}</div></div>)}
       </div>
-      <div style={{display:'flex',justifyContent:'flex-end',marginBottom:8}}>
-        <button onClick={exportCSV} style={{...G.btn,padding:'6px 14px',fontSize:11,background:'rgba(34,197,94,0.2)',color:'#22c55e',border:'1px solid rgba(34,197,94,0.3)'}}>📊 Export Excel</button>
+      <div style={{display:'flex',justifyContent:'space-between',marginBottom:8}}>
+        <button onClick={()=>setShowManuel(!showManuel)} style={{...G.btn,padding:'6px 14px',fontSize:11}}>+ Ajouter manuellement</button>
+        <button onClick={exportCSV} style={{...G.btn,padding:'6px 14px',fontSize:11,background:'rgba(34,197,94,0.2)',color:'#22c55e',border:'1px solid rgba(34,197,94,0.3)'}}>📊 Export CSV</button>
       </div>
+      {showManuel && (
+        <div style={{...G.card,marginBottom:12,border:'1px solid rgba(139,92,246,0.3)'}}>
+          <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0',marginBottom:10}}>Ajouter une candidature</div>
+          <input value={formManuel.title} onChange={e=>setFormManuel({...formManuel,title:e.target.value})} placeholder="Titre du poste *" style={{...G.inp,marginBottom:6,fontSize:12}}/>
+          <input value={formManuel.company} onChange={e=>setFormManuel({...formManuel,company:e.target.value})} placeholder="Entreprise *" style={{...G.inp,marginBottom:6,fontSize:12}}/>
+          <input value={formManuel.url} onChange={e=>setFormManuel({...formManuel,url:e.target.value})} placeholder="URL offre" style={{...G.inp,marginBottom:6,fontSize:12}}/>
+          <input value={formManuel.contact_rh} onChange={e=>setFormManuel({...formManuel,contact_rh:e.target.value})} placeholder="Nom du RH/recruteur" style={{...G.inp,marginBottom:6,fontSize:12}}/>
+          <input value={formManuel.contact_linkedin} onChange={e=>setFormManuel({...formManuel,contact_linkedin:e.target.value})} placeholder="LinkedIn du recruteur" style={{...G.inp,marginBottom:6,fontSize:12}}/>
+          <input value={formManuel.contact_email} onChange={e=>setFormManuel({...formManuel,contact_email:e.target.value})} placeholder="Email recruteur" style={{...G.inp,marginBottom:6,fontSize:12}}/>
+          <select value={formManuel.source_candidature} onChange={e=>setFormManuel({...formManuel,source_candidature:e.target.value})} style={{...G.inp,marginBottom:6,fontSize:12}}>
+            <option>LinkedIn</option>
+            <option>Site entreprise</option>
+            <option>JobAssistant</option>
+            <option>Cooptation</option>
+            <option>Cabinet recrutement</option>
+            <option>Autre</option>
+          </select>
+          <div style={{fontSize:11,color:'#94a3b8',marginBottom:4}}>Motivation: {formManuel.motivation_score}/5</div>
+          <input type="range" min="1" max="5" value={formManuel.motivation_score} onChange={e=>setFormManuel({...formManuel,motivation_score:parseInt(e.target.value)})} style={{width:'100%',marginBottom:8}}/>
+          <textarea value={formManuel.notes} onChange={e=>setFormManuel({...formManuel,notes:e.target.value})} placeholder="Notes..." style={{...G.inp,height:50,fontSize:11,resize:'none',marginBottom:8}}/>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={addManuel} style={{...G.btn,padding:'8px 16px',fontSize:12}}>Ajouter</button>
+            <button onClick={()=>setShowManuel(false)} style={{...G.btn,padding:'8px 16px',fontSize:12,background:'rgba(100,116,139,0.2)'}}>Annuler</button>
+          </div>
+        </div>
+      )}
       {nbRelance>0&&<div style={{...G.card,background:'rgba(245,158,11,0.1)',border:'1px solid rgba(245,158,11,0.3)',marginBottom:12,fontSize:12,color:'#f59e0b',fontWeight:600}}>🔔 {nbRelance} candidature(s) a relancer</div>}
       {candidatures.length===0?<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune candidature — Postule sur une offre pour demarrer</div>:candidatures.map(c=>{
         const s=STATUTS.find(x=>x.id===c.statut)||STATUTS[0];
@@ -523,7 +614,10 @@ const CandidaturesPage = () => {
               <div style={{width:40,height:40,borderRadius:10,background:'#1e293b',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(c.company||'?')[0].toUpperCase()}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:13,fontWeight:700,color:'#fff',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
-                <div style={{fontSize:11,color:'#94a3b8',marginBottom:4}}>{c.company} · {joursDepuis(c.date_postulation)}</div>
+                <div style={{fontSize:11,color:'#94a3b8',marginBottom:4}}>{c.company} · {joursDepuis(c.date_postulation)} · <span style={{color:'#64748b'}}>{c.source_candidature||'JobAssistant'}</span></div>
+                {c.contact_rh&&<div style={{fontSize:10,color:'#60a5fa',marginBottom:2}}>👤 {c.contact_rh} {c.contact_email&&'· '+c.contact_email}</div>}
+                {c.contact_linkedin&&<a href={c.contact_linkedin} target="_blank" rel="noopener noreferrer" style={{fontSize:10,color:'#a78bfa'}}>LinkedIn recruteur</a>}
+                {c.motivation_score>0&&<div style={{fontSize:10,color:'#ec4899',marginBottom:2}}>{'♥'.repeat(c.motivation_score)} Motivation: {c.motivation_score}/5</div>}
                 {aRelancer(c)&&<div style={{fontSize:11,color:'#f59e0b',marginBottom:4}}>🔔 A relancer !</div>}
                 <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:8}}>
                   {STATUTS.map(st=><button key={st.id} onClick={()=>updateStatut(c.id,st.id)} style={{background:c.statut===st.id?st.color+'25':'transparent',color:c.statut===st.id?st.color:'#475569',border:'1px solid '+(c.statut===st.id?st.color+'80':'#334155'),borderRadius:6,padding:'2px 8px',fontSize:10,cursor:'pointer'}}>{c.statut===st.id&&'✓ '}{st.label}</button>)}
@@ -727,6 +821,41 @@ const PortfolioPage = () => {
         <div style={{fontSize:12,fontWeight:700,color:'#a78bfa',marginBottom:6}}>GitHub</div>
         <a href="https://github.com/mamaiga1987" target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:'#60a5fa'}}>github.com/mamaiga1987</a>
       </div>
+    </div>
+  );
+};
+
+const BlacklistPage = () => {
+  const [list, setList] = React.useState([]);
+  const [form, setForm] = React.useState({company:'',raison:''});
+  const [showForm, setShowForm] = React.useState(false);
+  React.useEffect(()=>{axios.get(API+'/blacklist').then(r=>setList(r.data));},[]);
+  const add = async () => {
+    if(!form.company) return;
+    const r = await axios.post(API+'/blacklist', form);
+    setList(l=>[r.data,...l]); setForm({company:'',raison:''}); setShowForm(false);
+  };
+  const remove = async (id) => { await axios.delete(API+'/blacklist/'+id); setList(l=>l.filter(x=>x.id!==id)); };
+  return (
+    <div>
+      <button onClick={()=>setShowForm(!showForm)} style={{...G.btn,width:'100%',marginBottom:12}}>+ Ajouter entreprise a blacklister</button>
+      {showForm && (
+        <div style={{...G.card,marginBottom:12}}>
+          <input value={form.company} onChange={e=>setForm({...form,company:e.target.value})} placeholder="Nom entreprise" style={{...G.inp,marginBottom:8}}/>
+          <input value={form.raison} onChange={e=>setForm({...form,raison:e.target.value})} placeholder="Raison (refus, mauvaise culture...)" style={{...G.inp,marginBottom:8}}/>
+          <button onClick={add} style={{...G.btn,padding:'8px 16px',fontSize:12}}>Blacklister</button>
+        </div>
+      )}
+      {list.length===0&&!showForm&&<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune entreprise blacklistee</div>}
+      {list.map(e=>(
+        <div key={e.id} style={{...G.card,marginBottom:8,display:'flex',justifyContent:'space-between',alignItems:'center',borderLeft:'3px solid #ef4444'}}>
+          <div>
+            <div style={{fontSize:13,fontWeight:700,color:'#fff'}}>{e.company}</div>
+            {e.raison&&<div style={{fontSize:11,color:'#64748b'}}>{e.raison}</div>}
+          </div>
+          <button onClick={()=>remove(e.id)} style={{background:'transparent',border:'none',color:'#ef4444',cursor:'pointer'}}><Trash2 size={14}/></button>
+        </div>
+      ))}
     </div>
   );
 };
@@ -1123,7 +1252,7 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises'};
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
@@ -1137,6 +1266,7 @@ export default function App() {
       case 'tendances': return <TendancesPage key={Date.now()}/>;
       case 'portfolio': return <PortfolioPage key={Date.now()}/>;
       case 'agenda': return <AgendaPage key={Date.now()}/>;
+      case 'blacklist': return <BlacklistPage key={Date.now()}/>;
       default: return null;
     }
   };

@@ -1429,3 +1429,98 @@ app.post('/api/jobs/:id/simuler-entretien', async (req, res) => {
     res.json({ response: result, historique: messages });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── CANDIDATURE MANUELLE ──────────────────────────────────────────────────────
+app.post('/api/candidatures/manuelle', async (req, res) => {
+  try {
+    const { title, company, url, contact_rh, contact_linkedin, contact_email, notes, source_candidature, motivation_score } = req.body;
+    const r = await pool.query(
+      'INSERT INTO ja_candidatures (title,company,url,statut,date_postulation,contact_rh,contact_linkedin,contact_email,notes,source_candidature,motivation_score) VALUES ($1,$2,$3,$4,NOW(),$5,$6,$7,$8,$9,$10) RETURNING *',
+      [title,company,url||'','postule',contact_rh||'',contact_linkedin||'',contact_email||'',notes||'',source_candidature||'Manuel',motivation_score||0]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── FICHE ENTREPRISE ──────────────────────────────────────────────────────────
+app.get('/api/entreprise/:nom', async (req, res) => {
+  try {
+    const nom = decodeURIComponent(req.params.nom);
+    const offres = await pool.query('SELECT title, ia_score, location, contract_type FROM ja_jobs WHERE company ILIKE $1 ORDER BY ia_score DESC LIMIT 5', ['%'+nom+'%']);
+    
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const prompt = `En 150 mots max, donne une fiche synthétique sur l'entreprise "${nom}" en France: secteur d'activité, taille approximative, culture d'entreprise connue, points positifs et négatifs comme employeur, actualités récentes si connues. Format: bullet points courts. Si tu ne connais pas l'entreprise, dis-le clairement.`;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:300,messages:[{role:'user',content:prompt}]});
+    const fiche = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',()=>resolve('Erreur'));r.write(body);r.end();
+    });
+    res.json({ nom, fiche, offres: offres.rows });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── REPONSES STAR ─────────────────────────────────────────────────────────────
+app.post('/api/jobs/:id/reponses-star', async (req, res) => {
+  try {
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1',[req.params.id])).rows[0];
+    const prompt = `Génère 3 réponses STAR (Situation, Tâche, Action, Résultat) pour Mohamed Assalia Maiga qui postule pour "${job?.title}" chez ${job?.company||'?'}. Basé sur son expérience réelle: Free Mobile (IT Product Manager, roadmap analytique QoS/QoE, 50 KPI réseau, ETL/Power BI/Superset, -40% délai incidents), projet association (RAG/pgvector/LangChain, 150 résidents, 5 modules). Chaque réponse STAR doit être concrète, chiffrée et directement liée aux compétences du poste. Format: **Question probable:** ... puis S/T/A/R.`;
+    
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:prompt}]});
+    const reponses = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
+      r.on('error',()=>resolve('Erreur'));r.write(body);r.end();
+    });
+    res.json({ reponses });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── BLACKLIST ENTREPRISES ─────────────────────────────────────────────────────
+app.post('/api/blacklist', async (req, res) => {
+  try {
+    await pool.query('CREATE TABLE IF NOT EXISTS ja_blacklist (id SERIAL PRIMARY KEY, company VARCHAR(255) UNIQUE, raison TEXT, created_at TIMESTAMP DEFAULT NOW())');
+    const { company, raison } = req.body;
+    const r = await pool.query('INSERT INTO ja_blacklist (company,raison) VALUES ($1,$2) ON CONFLICT (company) DO UPDATE SET raison=$2 RETURNING *',[company,raison||'']);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/blacklist', async (req, res) => {
+  try {
+    await pool.query('CREATE TABLE IF NOT EXISTS ja_blacklist (id SERIAL PRIMARY KEY, company VARCHAR(255) UNIQUE, raison TEXT, created_at TIMESTAMP DEFAULT NOW())');
+    const r = await pool.query('SELECT * FROM ja_blacklist ORDER BY created_at DESC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/blacklist/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ja_blacklist WHERE id=$1',[req.params.id]);
+    res.json({success:true});
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── SCORE MOTIVATION ──────────────────────────────────────────────────────────
+app.patch('/api/jobs/:id/motivation', async (req, res) => {
+  try {
+    const { score } = req.body;
+    await pool.query('UPDATE ja_jobs SET tags = array_append(array_remove(tags,$1),$2) WHERE id=$3',
+      ['motivation_'+0,'motivation_'+score,req.params.id]);
+    res.json({success:true, score});
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── ALERTE INSTANTANEE (verif toutes les heures) ──────────────────────────────
+app.post('/api/alertes/check-instant', async (req, res) => {
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({service:'gmail',auth:{user:'mmohamedassalia6@gmail.com',pass:process.env.GMAIL_PASS||''}});
+    const result = await pool.query(`SELECT title,company,ia_score,url FROM ja_jobs WHERE ia_score>=85 AND created_at>NOW()-INTERVAL '1 hour' ORDER BY ia_score DESC LIMIT 5`);
+    if(result.rows.length===0) return res.json({sent:false});
+    const html = `<h2>🚨 ${result.rows.length} offre(s) 85%+ detectee(s) !</h2>${result.rows.map(j=>`<p><strong>${j.title}</strong> — ${j.company||'?'} — ${j.ia_score}% <a href="${j.url||'#'}">Voir</a></p>`).join('')}`;
+    await transporter.sendMail({from:'JobAssistant IA <mmohamedassalia6@gmail.com>',to:'mmohamedassalia6@gmail.com',subject:`🚨 Offre ${result.rows[0].ia_score}%+ : ${result.rows[0].title}`,html});
+    res.json({sent:true,count:result.rows.length});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});

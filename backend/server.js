@@ -1206,6 +1206,14 @@ Retourne UNIQUEMENT le JSON, rien d'autre.`;
       [data.nom, data.titre, data.annees_experience, data.competences, 
        data.metiers, data.certifications, data.localisation, data.resume]);
 
+    // Re-vectoriser le profil automatiquement
+    try {
+      const cvText = `${data.titre}. ${data.annees_experience} ans. Compétences: ${(data.competences||[]).join(', ')}. Métiers: ${(data.metiers||[]).join(', ')}. Certifications: ${(data.certifications||[]).join(', ')}.`;
+      const emb = await getEmbedding(cvText);
+      await pool.query('DELETE FROM ja_profil_embedding');
+      await pool.query('INSERT INTO ja_profil_embedding (embedding, cv_text) VALUES ($1,$2)', [JSON.stringify(emb), cvText]);
+    } catch(e) { console.log('Vectorisation profil:', e.message); }
+
     res.json({ success: true, data });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -1657,7 +1665,7 @@ app.post('/api/recalcul-scores-combines', async (req, res) => {
     let profilVector = profilEmb.rows[0].embedding;
     if(typeof profilVector === 'string') profilVector = JSON.parse(profilVector);
 
-    const offres = await pool.query('SELECT id, ia_score, embedding FROM ja_jobs WHERE embedding IS NOT NULL');
+    const offres = await pool.query('SELECT id, ia_score, embedding, published_at FROM ja_jobs WHERE embedding IS NOT NULL');
     
     let updated = 0;
     for(const job of offres.rows) {
@@ -1685,8 +1693,13 @@ app.post('/api/recalcul-scores-combines', async (req, res) => {
           (semanticScore - MIN_SIM) / (MAX_SIM - MIN_SIM) * 100
         )));
         
-        // Score final = 80% sémantique normalisé + 20% bonus contextuel
-        const combined = Math.min(Math.round(normalizedSemantic * 0.8 + bonus), 99);
+        // Bonus fraîcheur (offres récentes prioritaires)
+        const pubDate = job.published_at ? new Date(job.published_at) : new Date();
+        const daysOld = Math.floor((Date.now() - pubDate) / 86400000);
+        const freshnessBonus = daysOld <= 1 ? 8 : daysOld <= 3 ? 5 : daysOld <= 7 ? 3 : daysOld <= 14 ? 1 : 0;
+
+        // Score final = 80% sémantique normalisé + 20% bonus contextuel + fraîcheur
+        const combined = Math.min(Math.round(normalizedSemantic * 0.8 + bonus + freshnessBonus), 99);
         await pool.query('UPDATE ja_jobs SET semantic_score=$1, ia_score=$2 WHERE id=$3',
           [semanticScore, Math.max(combined, 1), job.id]);
         updated++;
@@ -1694,5 +1707,218 @@ app.post('/api/recalcul-scores-combines', async (req, res) => {
     }
 
     res.json({ updated, message: updated + ' scores combinés recalculés' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── TIMELINE CANDIDATURE ──────────────────────────────────────────────────────
+app.get('/api/candidatures/:id/timeline', async (req, res) => {
+  try {
+    const cand = (await pool.query('SELECT * FROM ja_candidatures WHERE id=$1',[req.params.id])).rows[0];
+    if(!cand) return res.status(404).json({error:'Non trouvée'});
+    
+    const timeline = [
+      {etape:'Postulé', date:cand.date_postulation, done:true, color:'#3b82f6'},
+      {etape:'Relancé', date:cand.statut==='relance'?cand.updated_at:null, done:['relance','entretien','offre'].includes(cand.statut), color:'#8b5cf6'},
+      {etape:'Entretien', date:cand.date_entretien, done:['entretien','offre'].includes(cand.statut), color:'#f59e0b'},
+      {etape:'Offre reçue', date:null, done:cand.statut==='offre', color:'#10b981'},
+      {etape:'Refus', date:null, done:cand.statut==='refus', color:'#ef4444'},
+    ];
+    res.json({cand, timeline});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── RAPPORT HEBDOMADAIRE ──────────────────────────────────────────────────────
+app.post('/api/rapports/hebdomadaire', async (req, res) => {
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({service:'gmail',auth:{user:'mmohamedassalia6@gmail.com',pass:process.env.GMAIL_PASS||''}});
+
+    const stats = await pool.query(`
+      SELECT 
+        COUNT(*) as total_cand,
+        COUNT(CASE WHEN date_postulation > NOW()-INTERVAL '7 days' THEN 1 END) as nouvelles_semaine,
+        COUNT(CASE WHEN statut='entretien' THEN 1 END) as entretiens,
+        COUNT(CASE WHEN statut='offre' THEN 1 END) as offres,
+        COUNT(CASE WHEN statut='refus' THEN 1 END) as refus,
+        COUNT(CASE WHEN statut='postule' AND date_postulation < NOW()-INTERVAL '7 days' THEN 1 END) as a_relancer
+      FROM ja_candidatures`);
+
+    const topOffres = await pool.query(`
+      SELECT title, company, ia_score FROM ja_jobs 
+      WHERE ia_score >= 75 AND created_at > NOW()-INTERVAL '7 days'
+      ORDER BY ia_score DESC LIMIT 5`);
+
+    const competences = await pool.query(`
+      SELECT unnest(tags) as comp, COUNT(*) as nb
+      FROM ja_jobs WHERE created_at > NOW()-INTERVAL '7 days'
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 10`);
+
+    const s = stats.rows[0];
+    const semaine = new Date().toLocaleDateString('fr-FR',{day:'numeric',month:'long',year:'numeric'});
+
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial;padding:20px;background:#f0f4f8">
+<div style="max-width:600px;margin:0 auto;background:white;border-radius:12px;overflow:hidden">
+<div style="background:linear-gradient(135deg,#1e3a5f,#8b5cf6);padding:24px;color:white;text-align:center">
+<h2 style="margin:0">📊 Rapport Hebdomadaire — ${semaine}</h2>
+</div>
+<div style="padding:20px">
+<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px">
+${[
+  {label:'Candidatures semaine',value:s.nouvelles_semaine,color:'#3b82f6'},
+  {label:'Entretiens',value:s.entretiens,color:'#f59e0b'},
+  {label:'A relancer',value:s.a_relancer,color:'#ef4444'}
+].map(x=>`<div style="text-align:center;padding:12px;background:#f8fafc;border-radius:8px;border-top:3px solid ${x.color}">
+<div style="font-size:24px;font-weight:800;color:${x.color}">${x.value}</div>
+<div style="font-size:11px;color:#64748b">${x.label}</div>
+</div>`).join('')}
+</div>
+${topOffres.rows.length>0?`<h3 style="color:#1e3a5f">🔥 Top offres cette semaine</h3>
+<ul>${topOffres.rows.map(j=>`<li><strong>${j.title}</strong> — ${j.company||'?'} — ${j.ia_score}%</li>`).join('')}</ul>`:''}
+<h3 style="color:#1e3a5f">📈 Compétences tendance cette semaine</h3>
+<p>${competences.rows.map(c=>c.comp).join(', ')}</p>
+<h3 style="color:#1e3a5f">✅ Actions recommandées</h3>
+<ul>
+<li>Postuler aux ${topOffres.rows.length} offres prioritaires</li>
+${parseInt(s.a_relancer)>0?`<li>Relancer ${s.a_relancer} candidature(s) sans réponse</li>`:''}
+<li>Mettre à jour votre profil LinkedIn</li>
+</ul>
+</div>
+<div style="background:#1e3a5f;color:rgba(255,255,255,0.7);padding:12px;text-align:center;font-size:12px">JobAssistant IA — jobassistant.monairbyte.eu</div>
+</div></body></html>`;
+
+    await transporter.sendMail({
+      from:'JobAssistant IA <mmohamedassalia6@gmail.com>',
+      to:'mmohamedassalia6@gmail.com',
+      subject:`📊 Rapport semaine du ${semaine} — ${s.nouvelles_semaine} candidatures`,
+      html
+    });
+
+    res.json({sent:true, stats:s});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── BANQUE DE QUESTIONS ───────────────────────────────────────────────────────
+app.get('/api/questions', async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_questions (
+      id SERIAL PRIMARY KEY, question TEXT, reponse TEXT, 
+      categorie VARCHAR(100), note INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW())`);
+    const r = await pool.query('SELECT * FROM ja_questions ORDER BY note DESC, created_at DESC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/questions', async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_questions (
+      id SERIAL PRIMARY KEY, question TEXT, reponse TEXT,
+      categorie VARCHAR(100), note INTEGER DEFAULT 0,
+      created_at TIMESTAMP DEFAULT NOW())`);
+    const {question, reponse, categorie, note} = req.body;
+    const r = await pool.query('INSERT INTO ja_questions (question,reponse,categorie,note) VALUES ($1,$2,$3,$4) RETURNING *',
+      [question, reponse||'', categorie||'General', note||0]);
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.delete('/api/questions/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ja_questions WHERE id=$1',[req.params.id]);
+    res.json({success:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── VEILLE CONCURRENTIELLE ────────────────────────────────────────────────────
+app.get('/api/veille/competences-tendance', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const compsProfil = (profil.competences||[]).map(c=>c.toLowerCase());
+
+    const tendance = await pool.query(`
+      SELECT unnest(tags) as comp, COUNT(*) as nb,
+        COUNT(CASE WHEN created_at > NOW()-INTERVAL '7 days' THEN 1 END) as nb_recent
+      FROM ja_jobs WHERE ia_score >= 50
+      GROUP BY 1 ORDER BY nb_recent DESC, nb DESC LIMIT 30`);
+
+    const manquantes = tendance.rows.filter(t => 
+      !compsProfil.some(p => p.includes(t.comp.toLowerCase()) || t.comp.toLowerCase().includes(p))
+    ).slice(0,10);
+
+    const presentes = tendance.rows.filter(t =>
+      compsProfil.some(p => p.includes(t.comp.toLowerCase()) || t.comp.toLowerCase().includes(p))
+    ).slice(0,10);
+
+    res.json({manquantes, presentes, total: tendance.rows.length});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── RECOMMANDATIONS FORMATIONS ────────────────────────────────────────────────
+app.get('/api/formations/recommandations', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const tendance = await pool.query(`
+      SELECT unnest(tags) as comp, COUNT(*) as nb
+      FROM ja_jobs WHERE ia_score >= 50
+      GROUP BY 1 ORDER BY nb DESC LIMIT 20`);
+
+    const compsProfil = (profil.competences||[]).map(c=>c.toLowerCase());
+    const manquantes = tendance.rows
+      .filter(t => !compsProfil.some(p => p.includes(t.comp.toLowerCase()) || t.comp.toLowerCase().includes(p)))
+      .slice(0,5)
+      .map(t => t.comp);
+
+    const formations = {
+      'dbt': {plateforme:'dbt Learn', url:'https://learn.getdbt.com', duree:'8h', niveau:'Intermédiaire', gratuit:true},
+      'databricks': {plateforme:'Databricks Academy', url:'https://academy.databricks.com', duree:'16h', niveau:'Intermédiaire', gratuit:true},
+      'spark': {plateforme:'Coursera', url:'https://www.coursera.org/learn/apache-spark', duree:'20h', niveau:'Avancé', gratuit:false},
+      'kubernetes': {plateforme:'KodeKloud', url:'https://kodekloud.com', duree:'24h', niveau:'Avancé', gratuit:false},
+      'terraform': {plateforme:'HashiCorp Learn', url:'https://developer.hashicorp.com/terraform/tutorials', duree:'12h', niveau:'Intermédiaire', gratuit:true},
+      'airflow': {plateforme:'Astronomer', url:'https://academy.astronomer.io', duree:'8h', niveau:'Intermédiaire', gratuit:true},
+      'kafka': {plateforme:'Confluent', url:'https://developer.confluent.io/learn-kafka', duree:'10h', niveau:'Avancé', gratuit:true},
+      'snowflake': {plateforme:'Snowflake University', url:'https://university.snowflake.com', duree:'12h', niveau:'Intermédiaire', gratuit:true},
+    };
+
+    const recommandations = manquantes.map(comp => ({
+      competence: comp,
+      ...(formations[comp.toLowerCase()] || {
+        plateforme:'OpenClassrooms / Udemy',
+        url:`https://www.udemy.com/courses/search/?q=${encodeURIComponent(comp)}`,
+        duree:'Variable', niveau:'Intermédiaire', gratuit:false
+      })
+    }));
+
+    res.json({recommandations, manquantes});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── SCORE PREPARATION ─────────────────────────────────────────────────────────
+app.patch('/api/candidatures/:id/preparation', async (req, res) => {
+  try {
+    const { prep_lettre, prep_pitch, prep_star, prep_entretien, prep_entreprise } = req.body;
+    const score = [prep_lettre, prep_pitch, prep_star, prep_entretien, prep_entreprise]
+      .filter(Boolean).length * 20;
+    await pool.query(`UPDATE ja_candidatures SET 
+      prep_lettre=$1, prep_pitch=$2, prep_star=$3, prep_entretien=$4, prep_entreprise=$5,
+      score_preparation=$6 WHERE id=$7`,
+      [prep_lettre||false, prep_pitch||false, prep_star||false, 
+       prep_entretien||false, prep_entreprise||false, score, req.params.id]);
+    res.json({ success:true, score });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DEDUPLICATION AUTOMATIQUE ─────────────────────────────────────────────────
+app.post('/api/jobs/deduplicate', async (req, res) => {
+  try {
+    const r = await pool.query(`
+      DELETE FROM ja_jobs WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER(
+            PARTITION BY LOWER(title), LOWER(COALESCE(company,''))
+            ORDER BY ia_score DESC, created_at DESC
+          ) as rn FROM ja_jobs
+        ) t WHERE rn > 1
+      ) RETURNING id`);
+    res.json({ deleted: r.rowCount, message: r.rowCount+' doublons supprimés' });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

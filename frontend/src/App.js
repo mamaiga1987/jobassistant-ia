@@ -41,6 +41,9 @@ const navItems = [
   {id:'agenda',icon:<Bell size={18}/>,label:'Agenda recherche'},
   {id:'blacklist',icon:<X size={18}/>,label:'Blacklist entreprises'},
   {id:'stats',icon:<Briefcase size={18}/>,label:'Statistiques avancees'},
+  {id:'questions',icon:<FileText size={18}/>,label:'Banque de questions'},
+  {id:'formations',icon:<Star size={18}/>,label:'Formations recommandees'},
+  {id:'veille-comp',icon:<Search size={18}/>,label:'Veille competences'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -639,6 +642,28 @@ const CandidaturesPage = () => {
                 <div style={{display:'flex',flexWrap:'wrap',gap:4,marginBottom:8}}>
                   {STATUTS.map(st=><button key={st.id} onClick={()=>updateStatut(c.id,st.id)} style={{background:c.statut===st.id?st.color+'25':'transparent',color:c.statut===st.id?st.color:'#475569',border:'1px solid '+(c.statut===st.id?st.color+'80':'#334155'),borderRadius:6,padding:'2px 8px',fontSize:10,cursor:'pointer'}}>{c.statut===st.id&&'✓ '}{st.label}</button>)}
                 </div>
+                {c.statut==='entretien'&&(
+                  <div style={{padding:8,marginBottom:6,background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.2)',borderRadius:8}}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                      <span style={{fontSize:11,fontWeight:600,color:'#f59e0b'}}>Preparation: {c.score_preparation||0}%</span>
+                      <span style={{fontSize:10,color:'#64748b'}}>{c.score_preparation===100?'✅ Pret':'En cours...'}</span>
+                    </div>
+                    <div style={{height:4,background:'rgba(30,41,59,0.8)',borderRadius:2,marginBottom:6}}>
+                      <div style={{height:4,width:(c.score_preparation||0)+'%',background:c.score_preparation===100?'#22c55e':'#f59e0b',borderRadius:2}}/>
+                    </div>
+                    <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                      {[{key:'prep_lettre',label:'✉️ Lettre'},{key:'prep_pitch',label:'⚡ Pitch'},{key:'prep_star',label:'⭐ STAR'},{key:'prep_entretien',label:'🎯 Questions'},{key:'prep_entreprise',label:'🏢 Entreprise'}].map(p=>(
+                        <button key={p.key} onClick={async()=>{
+                          const updated={...c,[p.key]:!c[p.key]};
+                          const r=await axios.patch(API+'/candidatures/'+c.id+'/preparation',{prep_lettre:updated.prep_lettre||false,prep_pitch:updated.prep_pitch||false,prep_star:updated.prep_star||false,prep_entretien:updated.prep_entretien||false,prep_entreprise:updated.prep_entreprise||false});
+                          setCandidatures(cs=>cs.map(x=>x.id===c.id?{...x,[p.key]:!c[p.key],score_preparation:r.data.score}:x));
+                        }} style={{background:c[p.key]?'rgba(34,197,94,0.2)':'transparent',color:c[p.key]?'#22c55e':'#64748b',border:'1px solid '+(c[p.key]?'rgba(34,197,94,0.3)':'#334155'),borderRadius:6,padding:'2px 8px',fontSize:10,cursor:'pointer'}}>
+                          {p.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {editNote===c.id?<div><textarea value={noteText} onChange={e=>setNoteText(e.target.value)} placeholder="Notes..." style={{...G.inp,height:60,fontSize:11,resize:'none'}}/><div style={{display:'flex',gap:6,marginTop:4}}><button onClick={()=>saveNote(c.id)} style={{...G.btn,padding:'3px 10px',fontSize:11}}>Sauver</button><button onClick={()=>setEditNote(null)} style={{...G.btn,padding:'3px 10px',fontSize:11,background:'rgba(100,116,139,0.2)'}}>Annuler</button></div></div>:<div onClick={()=>{setEditNote(c.id);setNoteText(c.notes||'');}} style={{fontSize:11,color:c.notes?'#94a3b8':'#475569',cursor:'pointer',fontStyle:c.notes?'normal':'italic'}}>{c.notes||'+ Ajouter une note...'}</div>}
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:6}}>{c.url&&<a href={c.url} target="_blank" rel="noopener noreferrer" style={{color:'#8b5cf6'}}><ExternalLink size={14}/></a>}<button onClick={()=>deleteCandidat(c.id)} style={{background:'transparent',border:'none',color:'#ef4444',cursor:'pointer'}}><Trash2 size={14}/></button></div>
@@ -837,6 +862,126 @@ const PortfolioPage = () => {
       <div style={{...G.card,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
         <div style={{fontSize:12,fontWeight:700,color:'#a78bfa',marginBottom:6}}>GitHub</div>
         <a href="https://github.com/mamaiga1987" target="_blank" rel="noopener noreferrer" style={{fontSize:12,color:'#60a5fa'}}>github.com/mamaiga1987</a>
+      </div>
+    </div>
+  );
+};
+
+const BanqueQuestionsPage = () => {
+  const [questions, setQuestions] = React.useState([]);
+  const [form, setForm] = React.useState({question:'',reponse:'',categorie:'Motivation',note:3});
+  const [showForm, setShowForm] = React.useState(false);
+  const categories = ['Motivation','Competences techniques','Experience','STAR','Comportemental','Salaire'];
+  React.useEffect(()=>{ axios.get(API+'/questions').then(r=>setQuestions(r.data)); },[]);
+  const add = async () => {
+    if(!form.question) return;
+    const r = await axios.post(API+'/questions', form);
+    setQuestions(q=>[r.data,...q]);
+    setForm({question:'',reponse:'',categorie:'Motivation',note:3});
+    setShowForm(false);
+  };
+  const remove = async (id) => { await axios.delete(API+'/questions/'+id); setQuestions(q=>q.filter(x=>x.id!==id)); };
+  return (
+    <div>
+      <button onClick={()=>setShowForm(!showForm)} style={{...G.btn,width:'100%',marginBottom:12}}>+ Ajouter une question</button>
+      {showForm&&(
+        <div style={{...G.card,marginBottom:12}}>
+          <textarea value={form.question} onChange={e=>setForm({...form,question:e.target.value})} placeholder="Question d'entretien..." style={{...G.inp,height:60,resize:'none',marginBottom:8,fontSize:12}}/>
+          <textarea value={form.reponse} onChange={e=>setForm({...form,reponse:e.target.value})} placeholder="Votre meilleure réponse..." style={{...G.inp,height:80,resize:'none',marginBottom:8,fontSize:12}}/>
+          <select value={form.categorie} onChange={e=>setForm({...form,categorie:e.target.value})} style={{...G.inp,marginBottom:8,fontSize:12}}>
+            {categories.map(c=><option key={c}>{c}</option>)}
+          </select>
+          <div style={{fontSize:11,color:'#94a3b8',marginBottom:4}}>Note: {form.note}/5</div>
+          <input type="range" min="1" max="5" value={form.note} onChange={e=>setForm({...form,note:parseInt(e.target.value)})} style={{width:'100%',marginBottom:8}}/>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={add} style={{...G.btn,padding:'8px 16px',fontSize:12}}>Sauvegarder</button>
+            <button onClick={()=>setShowForm(false)} style={{...G.btn,padding:'8px 16px',fontSize:12,background:'rgba(100,116,139,0.2)'}}>Annuler</button>
+          </div>
+        </div>
+      )}
+      {questions.length===0&&!showForm&&<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune question — Ajoutez vos questions d'entretien</div>}
+      {categories.map(cat=>{
+        const qs = questions.filter(q=>q.categorie===cat);
+        if(qs.length===0) return null;
+        return (
+          <div key={cat} style={{marginBottom:16}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#a78bfa',marginBottom:8}}>📂 {cat} ({qs.length})</div>
+            {qs.map(q=>(
+              <div key={q.id} style={{...G.card,marginBottom:8,borderLeft:'3px solid #8b5cf6'}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:6}}>
+                  <div style={{fontSize:12,fontWeight:600,color:'#e2e8f0',flex:1}}>{q.question}</div>
+                  <div style={{display:'flex',gap:4,alignItems:'center'}}>
+                    <span style={{fontSize:10,color:'#f59e0b'}}>{'★'.repeat(q.note)}</span>
+                    <button onClick={()=>remove(q.id)} style={{background:'transparent',border:'none',color:'#ef4444',cursor:'pointer'}}><Trash2 size={12}/></button>
+                  </div>
+                </div>
+                {q.reponse&&<div style={{fontSize:11,color:'#64748b',lineHeight:1.6,whiteSpace:'pre-wrap'}}>{q.reponse}</div>}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const FormationsPage = () => {
+  const [data, setData] = React.useState(null);
+  React.useEffect(()=>{ axios.get(API+'/formations/recommandations').then(r=>setData(r.data)).catch(()=>setData({recommandations:[],manquantes:[]})); },[]);
+  if(!data) return <div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Chargement...</div>;
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:12,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#a78bfa',marginBottom:6}}>Compétences manquantes vs marché</div>
+        <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+          {(data.manquantes||[]).map(c=><span key={c} style={{background:'rgba(239,68,68,0.1)',color:'#f87171',border:'1px solid rgba(239,68,68,0.2)',borderRadius:6,padding:'2px 8px',fontSize:11}}>{c}</span>)}
+        </div>
+      </div>
+      {(data.recommandations||[]).length===0&&<div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Aucune recommandation — votre profil est complet !</div>}
+      {(data.recommandations||[]).map((f,i)=>(
+        <div key={i} style={{...G.card,marginBottom:10,borderLeft:'3px solid #8b5cf6'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+            <div>
+              <div style={{fontSize:13,fontWeight:700,color:'#e2e8f0'}}>{f.competence}</div>
+              <div style={{fontSize:11,color:'#64748b'}}>{f.plateforme} · {f.duree} · {f.niveau}</div>
+            </div>
+            <div style={{display:'flex',gap:6,alignItems:'center'}}>
+              {f.gratuit&&<span style={{background:'rgba(34,197,94,0.1)',color:'#22c55e',border:'1px solid rgba(34,197,94,0.2)',borderRadius:6,padding:'2px 8px',fontSize:10}}>Gratuit</span>}
+              <a href={f.url} target="_blank" rel="noopener noreferrer" style={{...G.btn,padding:'4px 10px',fontSize:11,textDecoration:'none'}}>Voir</a>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+};
+
+const VeilleCompetencesPage = () => {
+  const [data, setData] = React.useState(null);
+  React.useEffect(()=>{ axios.get(API+'/veille/competences-tendance').then(r=>setData(r.data)).catch(()=>setData({manquantes:[],presentes:[]})); },[]);
+  if(!data) return <div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>Chargement...</div>;
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:12,background:'rgba(239,68,68,0.05)',border:'1px solid rgba(239,68,68,0.2)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#f87171',marginBottom:10}}>⚠️ Compétences demandées que vous n'avez pas</div>
+        {(data.manquantes||[]).map((c,i)=>(
+          <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid rgba(239,68,68,0.1)'}}>
+            <span style={{fontSize:12,color:'#e2e8f0'}}>{c.comp}</span>
+            <div style={{textAlign:'right'}}>
+              <span style={{fontSize:11,color:'#f87171',fontWeight:700}}>{c.nb} offres</span>
+              {parseInt(c.nb_recent)>0&&<span style={{fontSize:10,color:'#64748b',marginLeft:6}}>+{c.nb_recent} cette semaine</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{...G.card,background:'rgba(34,197,94,0.05)',border:'1px solid rgba(34,197,94,0.2)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#22c55e',marginBottom:10}}>✅ Vos compétences les plus demandées</div>
+        {(data.presentes||[]).map((c,i)=>(
+          <div key={i} style={{display:'flex',justifyContent:'space-between',padding:'6px 0',borderBottom:'1px solid rgba(34,197,94,0.1)'}}>
+            <span style={{fontSize:12,color:'#e2e8f0'}}>{c.comp}</span>
+            <span style={{fontSize:11,color:'#22c55e',fontWeight:700}}>{c.nb} offres</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1333,6 +1478,61 @@ const Dashboard = ({ stats, profil, setActive }) => {
 
 export default function App() {
   const [active, setActive] = useState('dashboard');
+  const [notifActive, setNotifActive] = useState(false);
+
+  React.useEffect(()=>{
+    if('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(()=>{});
+    }
+    if(Notification.permission === 'granted' && localStorage.getItem('notif_active')==='true') setNotifActive(true);
+  },[]);
+
+  const activerNotifications = async () => {
+    try {
+      if(!('Notification' in window)) {
+        alert('Votre navigateur ne supporte pas les notifications.');
+        return;
+      }
+      let permission = Notification.permission;
+      if(permission === 'default') {
+        permission = await Notification.requestPermission();
+      }
+      if(permission === 'granted') {
+        setNotifActive(true);
+        // Test notification immédiate
+        const notif = new Notification('JobAssistant IA ✅', {
+          body: 'Notifications activées ! Vous serez alerté des offres 85%+',
+          icon: '/logo192.png',
+          tag: 'test-notif'
+        });
+        notif.onclick = () => window.focus();
+        // Sauvegarder préférence
+        localStorage.setItem('notif_active','true');
+      } else if(permission === 'denied') {
+        alert('Notifications bloquées.\nAllez dans Paramètres navigateur > Notifications > jobassistant.monairbyte.eu > Autoriser');
+      }
+    } catch(e) { alert('Erreur: '+e.message); }
+  };
+
+  // Vérifier offres 85%+ toutes les 30 min et notifier
+  React.useEffect(()=>{
+    if(!notifActive) return;
+    const check = async () => {
+      try {
+        const r = await axios.get(API+'/jobs?minScore=85&limit=3&sort=score');
+        if(r.data?.length > 0) {
+          const job = r.data[0];
+          new Notification('🔥 Offre ' + job.ia_score + '%+ disponible !', {
+            body: job.title + ' — ' + (job.company||'?'),
+            icon: '/logo192.png',
+            tag: 'offre-'+job.id
+          });
+        }
+      } catch(e) {}
+    };
+    const interval = setInterval(check, 30*60*1000); // 30 min
+    return () => clearInterval(interval);
+  },[notifActive]);
   const [theme, setTheme] = useState('dark');
   React.useEffect(()=>{
     document.body.className = theme === 'light' ? 'light' : '';
@@ -1356,7 +1556,7 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',stats:'Statistiques avancees'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',stats:'Statistiques avancees',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences'};
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
@@ -1372,6 +1572,9 @@ export default function App() {
       case 'agenda': return <AgendaPage key={Date.now()}/>;
       case 'blacklist': return <BlacklistPage key={Date.now()}/>;
       case 'stats': return <StatsAvanceesPage key={Date.now()}/>;
+      case 'questions': return <BanqueQuestionsPage key={Date.now()}/>;
+      case 'formations': return <FormationsPage key={Date.now()}/>;
+      case 'veille-comp': return <VeilleCompetencesPage key={Date.now()}/>;
       default: return null;
     }
   };
@@ -1384,9 +1587,20 @@ export default function App() {
           {isMobile&&<button onClick={()=>setSidebarOpen(true)} style={{background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer'}}><Menu size={22}/></button>}
           <h1 style={{margin:0,fontSize:16,fontWeight:800}} className="text-main">{pageTitle[active]||active}</h1>
           <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
-            <button onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} style={{background:'transparent',border:'1px solid rgba(139,92,246,0.3)',borderRadius:8,padding:'5px 10px',cursor:'pointer',fontSize:14}}>
-              {theme==='dark'?'☀️':'🌙'}
+            <button onClick={notifActive?()=>{
+              setNotifActive(false);
+              localStorage.removeItem('notif_active');
+            }:activerNotifications} title={notifActive?'Désactiver notifications':'Activer notifications'} style={{background:notifActive?'rgba(34,197,94,0.2)':'transparent',border:'1px solid '+(notifActive?'rgba(34,197,94,0.3)':'rgba(139,92,246,0.3)'),borderRadius:8,padding:'5px 10px',cursor:'pointer',fontSize:14}}>
+              {notifActive?'🔔':'🔕'}
             </button>
+            {notifActive&&<button onClick={()=>{
+              new Notification('🔥 Test JobAssistant IA', {
+                body: 'Les notifications fonctionnent correctement !',
+                icon: '/logo192.png'
+              });
+            }} style={{background:'rgba(139,92,246,0.2)',border:'1px solid rgba(139,92,246,0.3)',borderRadius:8,padding:'5px 8px',cursor:'pointer',fontSize:11,color:'#a78bfa'}}>
+              Test
+            </button>}
             <div style={{width:34,height:34,borderRadius:9,background:'linear-gradient(135deg,#8b5cf6,#3b82f6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#fff'}}>
               {profil?.nom?.split(' ').map(w=>w[0]).join('').slice(0,2)||'MA'}
             </div>

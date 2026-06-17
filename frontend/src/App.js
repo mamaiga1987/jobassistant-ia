@@ -1190,6 +1190,18 @@ const ParametresPage = () => {
       <button onClick={async()=>{setMsg('Recalcul...');try{const r=await axios.post(API+'/recalcul-scores');setMsg(r.data.message);}catch(e){setMsg('Erreur');}setTimeout(()=>setMsg(''),4000);}} style={{...G.btn,width:'100%',padding:'12px',fontSize:14,marginTop:12,background:'linear-gradient(135deg,#1e3a5f,#2d6a9f)'}}>
         Recalculer les scores maintenant
       </button>
+      <button onClick={async()=>{
+        setMsg('Vectorisation du profil...');
+        try {
+          const r1 = await axios.post(API+'/profil/vectoriser');
+          setMsg('Profil vectorisé ! Calcul scores sémantiques...');
+          const r2 = await axios.post(API+'/recalcul-scores-combines');
+          setMsg('✅ '+r2.data.message+' — Scoring sémantique actif !');
+        } catch(e){setMsg('Erreur: '+e.message);}
+        setTimeout(()=>setMsg(''),5000);
+      }} style={{...G.btn,width:'100%',padding:'12px',fontSize:14,marginTop:8,background:'linear-gradient(135deg,#7c3aed,#0284c7)'}}>
+        🧠 Activer le scoring sémantique (pgvector)
+      </button>
     </div>
   );
 };
@@ -1198,14 +1210,25 @@ const Dashboard = ({ stats, profil, setActive }) => {
   const evolution = (stats?.evolution||[]).map(e=>({day:{'Mon':'Lun','Tue':'Mar','Wed':'Mer','Thu':'Jeu','Fri':'Ven','Sat':'Sam','Sun':'Dim'}[e.day]||e.day,offres:parseInt(e.offres)}));
   const repartition = (stats?.repartition||[]).map(r=>({name:r.zone,value:parseInt(r.count)}));
   const [sending, setSending] = React.useState(false);
-  const sendRapport = async () => { setSending(true); try { await axios.post(API+'/veille/run-et-email'); alert('Rapport envoye !'); } catch(e){alert('Erreur');} setSending(false); };
-  const metiers = [
-    {label:'Product Owner / MOA',score:76,color:'#8b5cf6'},
-    {label:'Data Engineer',score:63,color:'#3b82f6'},
+  const [metiers, setMetiers] = React.useState([
+    {label:'Product Owner / MOA',score:61,color:'#8b5cf6'},
+    {label:'Data Engineer',score:60,color:'#3b82f6'},
     {label:'Data Analyst',score:51,color:'#10b981'},
     {label:'Business Analyst',score:48,color:'#f59e0b'},
     {label:'Data Scientist',score:42,color:'#ec4899'},
-  ];
+  ]);
+  React.useEffect(()=>{
+    axios.get(API+'/stats/salaires').then(r=>{
+      const colors = ['#8b5cf6','#3b82f6','#10b981','#f59e0b','#ec4899'];
+      const updated = r.data.filter(m=>m.metier!=='Autre').map((m,i)=>({
+        label: m.metier,
+        score: parseInt(m.score_moyen||0),
+        color: colors[i%colors.length]
+      }));
+      if(updated.length>0) setMetiers(updated);
+    }).catch(()=>{});
+  },[]);
+  const sendRapport = async () => { setSending(true); try { await axios.post(API+'/veille/run-et-email'); alert('Rapport envoye !'); } catch(e){alert('Erreur');} setSending(false); };
   return (
     <div>
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginBottom:16}}>

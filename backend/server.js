@@ -1554,3 +1554,129 @@ app.get('/api/stats/avancees', async (req, res) => {
     res.json({ parJour: parJour.rows, parSource: parSource.rows, duree: duree.rows[0] });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── ENDPOINT COLLECTE FT ──────────────────────────────────────────────────────
+let ftCollectRunning = false;
+app.post('/api/collect-ft', async (req, res) => {
+  try {
+    if(ftCollectRunning) return res.json({success:true, message:'Collecte deja en cours'});
+    ftCollectRunning = true;
+    res.json({ success: true, message: 'Collecte France Travail demarree' });
+    const { exec } = require('child_process');
+    exec('node collector_ft_massive.js', {cwd:'/opt/jobassistant/backend', timeout:600000}, (err,stdout,stderr) => {
+      ftCollectRunning = false;
+      console.log('FT collecte terminee:', stdout.slice(-100));
+    });
+  } catch(e) { ftCollectRunning=false; res.status(500).json({ error: e.message }); }
+});
+
+// ── EMBEDDINGS & SCORING SÉMANTIQUE ──────────────────────────────────────────
+async function getEmbedding(text) {
+  const OPENAI_KEY = process.env.OPENAI_API_KEY;
+  const body = JSON.stringify({model:'text-embedding-3-small', input: text.slice(0,8000)});
+  return new Promise((resolve, reject) => {
+    const https = require('https');
+    const r = https.request({
+      hostname:'api.openai.com', path:'/v1/embeddings', method:'POST',
+      headers:{'Content-Type':'application/json','Authorization':'Bearer '+OPENAI_KEY,'Content-Length':Buffer.byteLength(body)}
+    }, r => {
+      let d=''; r.on('data',c=>d+=c);
+      r.on('end',()=>{
+        try { resolve(JSON.parse(d).data[0].embedding); }
+        catch(e) { reject(e); }
+      });
+    });
+    r.on('error', reject); r.write(body); r.end();
+  });
+}
+
+function cosineSimilarity(a, b) {
+  let dot=0, normA=0, normB=0;
+  for(let i=0;i<a.length;i++){dot+=a[i]*b[i];normA+=a[i]*a[i];normB+=b[i]*b[i];}
+  return dot/(Math.sqrt(normA)*Math.sqrt(normB));
+}
+
+// Vectoriser le profil CV
+app.post('/api/profil/vectoriser', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const cvText = `${profil.titre}. ${profil.annees_experience} ans d'expérience. 
+Compétences: ${(profil.competences||[]).join(', ')}.
+Métiers: ${(profil.metiers||[]).join(', ')}.
+Certifications: ${(profil.certifications||[]).join(', ')}.
+${profil.resume||''}`;
+
+    const embedding = await getEmbedding(cvText);
+    
+    await pool.query('DELETE FROM ja_profil_embedding');
+    await pool.query('INSERT INTO ja_profil_embedding (embedding, cv_text) VALUES ($1,$2)',
+      [JSON.stringify(embedding), cvText]);
+
+    res.json({ success: true, message: 'Profil vectorisé avec succès' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Calculer scores sémantiques pour toutes les offres
+app.post('/api/recalcul-scores-semantiques', async (req, res) => {
+  try {
+    // Récupérer embedding du profil
+    const profilEmb = await pool.query('SELECT embedding FROM ja_profil_embedding LIMIT 1');
+    if(profilEmb.rows.length === 0) return res.status(400).json({ error: 'Profil non vectorisé. Lancez /api/profil/vectoriser d\'abord' });
+    
+    const profilVector = profilEmb.rows[0].embedding;
+
+    // Offres sans embedding - les vectoriser par batch de 10
+    const offres = await pool.query('SELECT id, title, description, tags FROM ja_jobs WHERE embedding IS NULL LIMIT 50');
+    
+    let updated = 0;
+    for(const job of offres.rows) {
+      try {
+        const text = `${job.title}. ${(job.tags||[]).join(', ')}. ${(job.description||'').slice(0,500)}`;
+        const emb = await getEmbedding(text);
+        const similarity = cosineSimilarity(profilVector, emb);
+        const semanticScore = Math.round(similarity * 100);
+        
+        await pool.query('UPDATE ja_jobs SET embedding=$1, semantic_score=$2 WHERE id=$3',
+          [JSON.stringify(emb), semanticScore, job.id]);
+        updated++;
+        await new Promise(r=>setTimeout(r,100)); // Rate limit
+      } catch(e) { continue; }
+    }
+
+    res.json({ updated, message: `${updated} offres vectorisées` });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// Score combiné (actuel + sémantique)
+app.post('/api/recalcul-scores-combines', async (req, res) => {
+  try {
+    const profilEmb = await pool.query('SELECT embedding FROM ja_profil_embedding LIMIT 1');
+    if(profilEmb.rows.length === 0) return res.status(400).json({ error: 'Profil non vectorisé' });
+    
+    // Parser l'embedding profil (JSONB → array)
+    let profilVector = profilEmb.rows[0].embedding;
+    if(typeof profilVector === 'string') profilVector = JSON.parse(profilVector);
+
+    const offres = await pool.query('SELECT id, ia_score, embedding FROM ja_jobs WHERE embedding IS NOT NULL');
+    
+    let updated = 0;
+    for(const job of offres.rows) {
+      try {
+        // Parser l'embedding offre
+        let jobVector = job.embedding;
+        if(typeof jobVector === 'string') jobVector = JSON.parse(jobVector);
+        if(!Array.isArray(jobVector) || jobVector.length === 0) continue;
+
+        const similarity = cosineSimilarity(profilVector, jobVector);
+        const semanticScore = Math.round(Math.max(0, similarity) * 100);
+        // Score combiné: 60% score IA actuel + 40% score sémantique
+        const combined = Math.round(job.ia_score * 0.6 + semanticScore * 0.4);
+        await pool.query('UPDATE ja_jobs SET semantic_score=$1, ia_score=$2 WHERE id=$3',
+          [semanticScore, Math.min(Math.max(combined, 1), 99), job.id]);
+        updated++;
+      } catch(e) { continue; }
+    }
+
+    res.json({ updated, message: updated + ' scores combinés recalculés' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});

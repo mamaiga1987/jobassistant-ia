@@ -7,6 +7,8 @@ services:
     container_name: jobassistant-backend
     restart: unless-stopped
     env_file: .env
+    volumes:
+      - /data/jobassistant-cv:/data/jobassistant-cv
     networks:
       - web
       - jobassistant-internal

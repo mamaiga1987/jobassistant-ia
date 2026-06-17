@@ -929,7 +929,84 @@ app.post('/api/jobs/:id/entretien', async (req, res) => {
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── CV PDF ────────────────────────────────────────────────────────────────────
+// ── RETÉLÉCHARGER CV ORIGINAL ────────────────────────────────────────────────
+app.get('/api/profil/cv-original', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    if(!profil.cv_path) return res.status(404).json({error:'Aucun CV uploadé'});
+    const fs = require('fs');
+    if(!fs.existsSync(profil.cv_path)) return res.status(404).json({error:'Fichier non trouve'});
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition','attachment; filename='+(profil.cv_original_name||'mon_cv.pdf'));
+    fs.createReadStream(profil.cv_path).pipe(res);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── CV PDF TÉLÉCHARGEABLE ─────────────────────────────────────────────────────
+app.get('/api/profil/cv-pdf-download', async (req, res) => {
+  try {
+    const PDFDocument = require('pdfkit');
+    const profil = await getProfil();
+
+    const doc = new PDFDocument({margin:50, size:'A4'});
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition','attachment; filename=CV_Mohamed_Assalia_Maiga.pdf');
+    doc.pipe(res);
+
+    // En-tête
+    doc.fontSize(22).fillColor('#1e3a5f').text(profil.nom||'Mohamed Assalia Maiga', {align:'left'});
+    doc.fontSize(13).fillColor('#2d6a9f').text(profil.titre||'Product Owner Data & IA', {align:'left'});
+    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · mmohamedassalia6@gmail.com · Disponible immédiatement');
+    doc.moveDown(0.5);
+
+    // Ligne séparatrice
+    doc.moveTo(50,doc.y).lineTo(545,doc.y).strokeColor('#2d6a9f').lineWidth(2).stroke();
+    doc.moveDown(0.5);
+
+    // Profil
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('PROFIL');
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text(profil.resume||('Product Owner Data & IA avec '+(profil.annees_experience||9)+" ans d'experience en telecommunications."));
+    doc.moveDown(0.5);
+
+    // Certifications
+    if((profil.certifications||[]).length>0){
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('CERTIFICATIONS');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((profil.certifications||[]).join(' · '));
+      doc.moveDown(0.5);
+    }
+
+    // Compétences
+    if((profil.competences||[]).length>0){
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('COMPÉTENCES TECHNIQUES');
+      const comps = (profil.competences||[]).join(', ');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(comps);
+      doc.moveDown(0.5);
+    }
+
+    // Expériences
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('EXPÉRIENCES PROFESSIONNELLES');
+    const exps = [
+      {titre:'IT Product Manager, Data Analytics — Free Mobile (Iliad Group)', periode:'Juin 2022 – Mai 2026 · Paris, CDI', desc:'Pilotage roadmap analytique QoS/QoE nationale, 50 KPI réseau 3G/4G/5G, pipelines ETL/ELT, dashboards Power BI et Apache Superset. Réduction de 40% du délai de détection des incidents réseau.'},
+      {titre:"Product Owner Data & IA — Projet Association (Benevole)", periode:"Janvier 2023 – Aujourd'hui · Longjumeau (91)", desc:"Plateforme 5 modules pour 150+ residents. Architecture RAG: pgvector + OpenAI API + LangChain. DocTracker forensique, Headless BI Superset+React."},
+      {titre:"Analyste QoS — Free Mobile", periode:"Avril 2020 – Mai 2022 · Paris, CDI", desc:"Dashboards Power BI, 300+ stations RATP, zones blanches, reportings reglementaires."},
+      {titre:"Ingenieur Radio — SFR NOC SPAR", periode:"Novembre 2016 – Janvier 2020 · Velizy, CDI", desc:"Analyse KPI 2G/3G/4G, worst cells, automatisation VBA et Power BI."},
+    ];
+    exps.forEach(e=>{
+      doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre);
+      doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(e.desc);
+      doc.moveDown(0.3);
+    });
+
+    // Formation
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('FORMATION');
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text('Master Composants et Antennes — Télécommunications | Université Paris-Sud (Paris XI) | 2014–2016');
+
+    doc.end();
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── CV HTML (aperçu) ──────────────────────────────────────────────────────────
 app.get('/api/profil/cv-pdf', async (req, res) => {
   try {
     const profil = await getProfil();
@@ -1055,44 +1132,72 @@ h1{font-size:24px;font-weight:800;margin-bottom:6px}
 app.post('/api/analyse-ats', async (req, res) => {
   try {
     const profil = await getProfil();
+    const fs = require('fs');
+    const { execSync } = require('child_process');
+
+    // Extraire texte du CV PDF si disponible
+    let cvText = '';
+    if(profil.cv_path && fs.existsSync(profil.cv_path)) {
+      try {
+        cvText = execSync(`pdftotext "${profil.cv_path}" -`, {encoding:'utf8', timeout:15000});
+      } catch(e) { console.log('pdftotext error:', e.message); }
+    }
+
     // Top compétences demandées dans les offres
     const topComps = await pool.query(`
       SELECT unnest(tags) as comp, COUNT(*) as nb
       FROM ja_jobs WHERE ia_score >= 50
-      GROUP BY 1 ORDER BY 2 DESC LIMIT 20`);
+      GROUP BY 1 ORDER BY 2 DESC LIMIT 30`);
 
     const demandeesMarche = topComps.rows.map(r => r.comp.toLowerCase());
     const competencesProfil = (profil.competences||[]).map(c => c.toLowerCase());
 
+    // Compétences présentes/manquantes basées sur profil DB
     const manquantes = demandeesMarche.filter(c => !competencesProfil.some(p => p.includes(c) || c.includes(p)));
     const presentes = demandeesMarche.filter(c => competencesProfil.some(p => p.includes(c) || c.includes(p)));
     const score = Math.round(presentes.length / demandeesMarche.length * 100);
 
-    const prompt = `Tu es expert ATS et recrutement tech France. Analyse ce profil pour le marché IDF 2026:
-Profil: ${profil.titre}, ${profil.annees_experience} ans exp, certif: ${(profil.certifications||[]).join(', ')}
-Competences profil: ${competencesProfil.slice(0,20).join(', ')}
-Top 20 competences demandees sur le marche IDF: ${demandeesMarche.join(', ')}
-Competences manquantes vs marche: ${manquantes.slice(0,10).join(', ')}
-Score ATS actuel: ${score}%
+    // Si CV PDF disponible, analyse plus approfondie
+    const cvSource = cvText.length > 100 ? 
+      `CV PDF extrait (${cvText.length} caractères):\n${cvText.slice(0,2000)}` :
+      `Profil DB: ${profil.titre}, ${profil.annees_experience} ans, compétences: ${competencesProfil.slice(0,20).join(', ')}`;
 
-Donne:
-1. Score ATS /100 avec explication
-2. Top 5 competences a ajouter immediatement au CV
-3. Formulation optimale du titre pour passer les ATS
-4. 3 mots-cles critiques manquants
-5. Conseil pour le resume/accroche
+    const prompt = `Tu es expert ATS et recrutement tech France 2026. Analyse ce CV pour le marché IDF:
 
-Sois direct et actionnable.`;
+${cvSource}
+
+Top 30 compétences demandées sur le marché IDF actuellement:
+${demandeesMarche.join(', ')}
+
+Compétences détectées présentes: ${presentes.join(', ')}
+Compétences manquantes: ${manquantes.slice(0,15).join(', ')}
+Score matching actuel: ${score}%
+
+Donne une analyse complète:
+1. Score ATS /100 avec justification précise
+2. Top 5 compétences CRITIQUES à ajouter immédiatement
+3. Formulation optimale du titre CV pour passer les ATS (ex: "Product Owner Data & IA | RAG | pgvector | PSPO I")
+4. 3 phrases d'accroche optimisées ATS pour le résumé
+5. Mots-clés manquants les plus demandés par les recruteurs IDF
+6. Conseil spécifique pour améliorer le taux de passage ATS
+
+Sois très direct et actionnable. Base-toi sur le contenu réel du CV.`;
 
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:800,messages:[{role:'user',content:prompt}]});
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1200,messages:[{role:'user',content:prompt}]});
     const analyse = await new Promise((resolve) => {
       const https = require('https');
       const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve('Erreur')}})});
       r.on('error',e=>resolve('Erreur'));r.write(body);r.end();
     });
 
-    res.json({ score, presentes, manquantes: manquantes.slice(0,10), analyse });
+    res.json({ 
+      score, 
+      presentes, 
+      manquantes: manquantes.slice(0,15), 
+      analyse,
+      cv_utilise: cvText.length > 100 ? 'PDF uploadé' : 'Profil DB'
+    });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1154,13 +1259,20 @@ app.post('/api/jobs/:id/ft-message', async (req, res) => {
 
 // ── UPLOAD CV PDF ─────────────────────────────────────────────────────────────
 const multer = require('multer');
-const upload = multer({ dest: '/tmp/uploads/' });
+const upload = multer({ storage: multer.memoryStorage() });
 
 app.post('/api/profil/upload-cv', upload.single('cv'), async (req, res) => {
   try {
     const fs = require('fs');
     const { execSync } = require('child_process');
-    const filePath = req.file.path;
+    // Sauvegarder manuellement depuis memoryStorage
+    const cvDir = '/data/jobassistant-cv';
+    if(!fs.existsSync(cvDir)) fs.mkdirSync(cvDir, {recursive:true});
+    const cvFilename = 'cv_' + Date.now() + '.pdf';
+    const filePath = cvDir + '/' + cvFilename;
+    fs.writeFileSync(filePath, req.file.buffer);
+    req.file.path = filePath;
+    req.file.filename = cvFilename;
 
     // Extraire texte du PDF
     let cvText = '';
@@ -1169,7 +1281,7 @@ app.post('/api/profil/upload-cv', upload.single('cv'), async (req, res) => {
     } catch(e) {
       cvText = fs.readFileSync(filePath, 'utf8');
     }
-    fs.unlinkSync(filePath);
+    // Fichier conservé pour téléchargement ultérieur
 
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
     const prompt = `Analyse ce CV et extrait les informations en JSON exact:
@@ -1206,6 +1318,10 @@ Retourne UNIQUEMENT le JSON, rien d'autre.`;
       [data.nom, data.titre, data.annees_experience, data.competences, 
        data.metiers, data.certifications, data.localisation, data.resume]);
 
+    // Sauvegarder chemin du CV original
+    await pool.query('UPDATE ja_profil SET cv_path=$1, cv_original_name=$2 WHERE id=(SELECT id FROM ja_profil ORDER BY id DESC LIMIT 1)',
+      [req.file.path, req.file.originalname||'cv.pdf']);
+
     // Re-vectoriser le profil automatiquement
     try {
       const cvText = `${data.titre}. ${data.annees_experience} ans. Compétences: ${(data.competences||[]).join(', ')}. Métiers: ${(data.metiers||[]).join(', ')}. Certifications: ${(data.certifications||[]).join(', ')}.`;
@@ -1214,7 +1330,7 @@ Retourne UNIQUEMENT le JSON, rien d'autre.`;
       await pool.query('INSERT INTO ja_profil_embedding (embedding, cv_text) VALUES ($1,$2)', [JSON.stringify(emb), cvText]);
     } catch(e) { console.log('Vectorisation profil:', e.message); }
 
-    res.json({ success: true, data });
+    res.json({ success: true, data, cv_saved: true });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

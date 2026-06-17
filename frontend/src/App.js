@@ -737,7 +737,23 @@ const CVPage = ({ profil, setProfil }) => {
               {uploading?'Analyse...':'📤 Upload CV'}
               <input type="file" accept=".pdf" onChange={uploadCV} style={{display:'none'}}/>
             </label>
-            <button onClick={()=>window.open(API+'/profil/cv-pdf','_blank')} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(34,197,94,0.2)',color:'#22c55e',border:'1px solid rgba(34,197,94,0.3)'}}>📄 CV PDF</button>
+
+            <button onClick={async()=>{
+              try {
+                const resp = await fetch(API+'/profil/cv-original');
+                if(resp.ok){
+                  const blob = await resp.blob();
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = 'mon_cv.pdf';
+                  a.click();
+                  URL.revokeObjectURL(url);
+                } else {
+                  alert('Aucun CV uploade. Uploadez votre CV dabord.');
+                }
+              } catch(e){alert('Erreur: '+e.message);}
+            }} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(16,185,129,0.2)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>📎 Mon CV original</button>
             <button onClick={analyserATS} disabled={atsLoading} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(245,158,11,0.2)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.3)'}}>🎯 {atsLoading?'Analyse...':'Score ATS'}</button>
             <button onClick={()=>setEditing(!editing)} style={{...G.btn,padding:'6px 14px',fontSize:12}}>{editing?'Annuler':'Modifier'}</button>
           </div>
@@ -750,7 +766,7 @@ const CVPage = ({ profil, setProfil }) => {
           <div style={{marginTop:12,padding:12,background:'rgba(245,158,11,0.05)',border:'1px solid rgba(245,158,11,0.2)',borderRadius:8}}>
             <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
               <span style={{fontSize:13,fontWeight:700,color:'#f59e0b'}}>Score ATS: {ats.score}%</span>
-              <span style={{fontSize:11,color:'#64748b'}}>{ats.presentes?.length} / 20 competences</span>
+              <span style={{fontSize:11,color:ats.cv_utilise==='PDF uploadé'?'#22c55e':'#64748b'}}>{ats.cv_utilise==='PDF uploadé'?'📄 Basé sur votre CV PDF':'💾 Basé sur profil DB'}</span>
             </div>
             <div style={{marginBottom:8}}>
               <div style={{fontSize:11,color:'#ef4444',fontWeight:600,marginBottom:4}}>Manquantes:</div>

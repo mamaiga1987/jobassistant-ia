@@ -1,3 +1,4 @@
+import './index.css';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Briefcase, Upload, Search, Send, Star, Bell, Settings, FileText, Menu, X, ExternalLink, ChevronRight, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -6,8 +7,8 @@ const API = '/api';
 const COLORS = ['#8b5cf6','#3b82f6','#10b981','#f59e0b'];
 const G = {
   bg: '#060b18',
-  card: { background:'rgba(15,23,42,0.85)', border:'1px solid rgba(139,92,246,0.18)', borderRadius:16, padding:16 },
-  inp: { background:'rgba(30,41,59,0.8)', border:'1px solid rgba(139,92,246,0.2)', borderRadius:10, padding:'10px 14px', color:'#e2e8f0', fontSize:13, outline:'none', width:'100%', boxSizing:'border-box' },
+  card: { background:'var(--card-bg)', border:'1px solid var(--card-border)', borderRadius:16, padding:16 },
+  inp: { background:'var(--inp-bg)', border:'1px solid var(--inp-border)', borderRadius:10, padding:'10px 14px', color:'var(--inp-color)', fontSize:13, outline:'none', width:'100%', boxSizing:'border-box' },
   btn: { background:'linear-gradient(135deg,#8b5cf6,#3b82f6)', color:'#fff', border:'none', borderRadius:10, padding:'11px 18px', fontSize:13, fontWeight:600, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8 },
   tag: { background:'rgba(139,92,246,0.12)', color:'#a78bfa', border:'1px solid rgba(139,92,246,0.2)', borderRadius:6, padding:'2px 8px', fontSize:11 },
 };
@@ -43,7 +44,7 @@ const navItems = [
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
-  <div style={{width:isMobile?'80%':220,maxWidth:280,background:'rgba(8,12,25,0.98)',borderRight:isMobile?'none':'1px solid rgba(139,92,246,0.15)',display:'flex',flexDirection:'column',position:isMobile?'fixed':'relative',height:'100%',top:0,left:0,zIndex:1000,transform:isMobile?(open?'translateX(0)':'translateX(-100%)'):'none',transition:'transform .3s'}}>
+  <div className='sidebar' style={{width:isMobile?'80%':220,maxWidth:280,borderRight:isMobile?'none':'1px solid rgba(139,92,246,0.15)',display:'flex',flexDirection:'column',position:isMobile?'fixed':'relative',height:'100%',top:0,left:0,zIndex:1000,transform:isMobile?(open?'translateX(0)':'translateX(-100%)'):'none',transition:'transform .3s'}}>
     {isMobile&&<button onClick={()=>setOpen(false)} style={{position:'absolute',top:16,right:16,background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer'}}><X size={20}/></button>}
     <div style={{padding:'20px 16px',borderBottom:'1px solid rgba(139,92,246,0.1)'}}>
       <div style={{display:'flex',alignItems:'center',gap:10}}>
@@ -1309,6 +1310,10 @@ const Dashboard = ({ stats, profil, setActive }) => {
 
 export default function App() {
   const [active, setActive] = useState('dashboard');
+  const [theme, setTheme] = useState('dark');
+  React.useEffect(()=>{
+    document.body.className = theme === 'light' ? 'light' : '';
+  },[theme]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [profil, setProfil] = useState(null);
@@ -1352,14 +1357,19 @@ export default function App() {
       {isMobile&&sidebarOpen&&<div onClick={()=>setSidebarOpen(false)} style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.5)',zIndex:999}}/>}
       <Sidebar active={active} setActive={(p)=>{setActive(p);setSidebarOpen(false);}} isMobile={isMobile} open={sidebarOpen} setOpen={setSidebarOpen} profil={profil}/>
       <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-        <div style={{padding:'12px 16px',background:'rgba(8,12,25,0.95)',borderBottom:'1px solid rgba(139,92,246,0.1)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
+        <div className='header-bar' style={{padding:'12px 16px',borderBottom:'1px solid rgba(139,92,246,0.1)',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
           {isMobile&&<button onClick={()=>setSidebarOpen(true)} style={{background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer'}}><Menu size={22}/></button>}
-          <h1 style={{margin:0,fontSize:16,fontWeight:800,color:'#fff'}}>{pageTitle[active]||active}</h1>
-          <div style={{marginLeft:'auto',width:34,height:34,borderRadius:9,background:'linear-gradient(135deg,#8b5cf6,#3b82f6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#fff'}}>
-            {profil?.nom?.split(' ').map(w=>w[0]).join('').slice(0,2)||'MA'}
+          <h1 style={{margin:0,fontSize:16,fontWeight:800}} className="text-main">{pageTitle[active]||active}</h1>
+          <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
+            <button onClick={()=>setTheme(t=>t==='dark'?'light':'dark')} style={{background:'transparent',border:'1px solid rgba(139,92,246,0.3)',borderRadius:8,padding:'5px 10px',cursor:'pointer',fontSize:14}}>
+              {theme==='dark'?'☀️':'🌙'}
+            </button>
+            <div style={{width:34,height:34,borderRadius:9,background:'linear-gradient(135deg,#8b5cf6,#3b82f6)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:800,color:'#fff'}}>
+              {profil?.nom?.split(' ').map(w=>w[0]).join('').slice(0,2)||'MA'}
+            </div>
           </div>
         </div>
-        <div style={{flex:1,overflowY:'auto',padding:'16px'}}>
+        <div style={{flex:1,overflowY:'auto',padding:'16px',background:'var(--bg)',color:'var(--text)'}}>
           {renderPage()}
         </div>
       </div>

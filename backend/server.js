@@ -1669,10 +1669,26 @@ app.post('/api/recalcul-scores-combines', async (req, res) => {
 
         const similarity = cosineSimilarity(profilVector, jobVector);
         const semanticScore = Math.round(Math.max(0, similarity) * 100);
-        // Score combiné: 60% score IA actuel + 40% score sémantique
-        const combined = Math.round(job.ia_score * 0.6 + semanticScore * 0.4);
+        
+        // Bonus contextuel (20%) — localisation + salaire + séniorité
+        const full = (job.title+' '+(job.description||'')+' '+(job.tags||[]).join(' ')).toLowerCase();
+        let bonus = 0;
+        if(full.includes('paris')||full.includes('ile-de-france')||full.includes('91 -')||full.includes('92 -')||full.includes('93 -')) bonus += 10;
+        if(full.match(/4[89][0-9]{3}|5[0-9]{4}|6[0-5][0-9]{3}/)) bonus += 5;
+        if(full.includes('senior')||full.includes('confirmé')||full.includes('lead')) bonus += 5;
+        
+        // Normaliser le score sémantique (21-72 → 0-100)
+        // Basé sur les vraies valeurs observées: min=21, max=72
+        const MIN_SIM = 21;
+        const MAX_SIM = 72;
+        const normalizedSemantic = Math.round(Math.max(0, Math.min(100,
+          (semanticScore - MIN_SIM) / (MAX_SIM - MIN_SIM) * 100
+        )));
+        
+        // Score final = 80% sémantique normalisé + 20% bonus contextuel
+        const combined = Math.min(Math.round(normalizedSemantic * 0.8 + bonus), 99);
         await pool.query('UPDATE ja_jobs SET semantic_score=$1, ia_score=$2 WHERE id=$3',
-          [semanticScore, Math.min(Math.max(combined, 1), 99), job.id]);
+          [semanticScore, Math.max(combined, 1), job.id]);
         updated++;
       } catch(e) { continue; }
     }

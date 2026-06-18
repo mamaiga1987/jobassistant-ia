@@ -84,17 +84,30 @@ async function main() {
           
           const score = calcScore(offre.intitule, offre.description||'', tags);
           
-          const exists = await pool.query('SELECT id FROM ja_jobs WHERE url=$1', [offre.origineOffre?.urlOrigine||offre.id]);
+          const url = offre.origineOffre?.urlOrigine||('https://candidat.francetravail.fr/offres/recherche/detail/'+offre.id);
+          const pubDate = new Date(offre.dateCreation||Date.now());
+          const exists = await pool.query('SELECT id, published_at FROM ja_jobs WHERE url=$1', [url]);
+          
           if(exists.rows.length === 0) {
+            // Nouvelle offre
             await pool.query(
               'INSERT INTO ja_jobs (source,title,company,location,contract_type,published_at,url,description,tags,ia_score) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)',
-              ['France Travail', offre.intitule, offre.entreprise?.nom||'', 
-               (dept)+' - '+(offre.lieuTravail?.libelle||''), 
-               offre.typeContrat||'CDI', new Date(offre.dateCreation||Date.now()),
-               offre.origineOffre?.urlOrigine||('https://candidat.francetravail.fr/offres/recherche/detail/'+offre.id),
+              ['France Travail', offre.intitule, offre.entreprise?.nom||'',
+               dept+' - '+(offre.lieuTravail?.libelle||''),
+               offre.typeContrat||'CDI', pubDate, url,
                (offre.description||'').slice(0,3000), tags, score]
             );
             total++;
+          } else {
+            // Offre existante - mettre à jour si plus récente
+            const existingDate = new Date(exists.rows[0].published_at);
+            if(pubDate > existingDate) {
+              await pool.query(
+                'UPDATE ja_jobs SET title=$1, description=$2, tags=$3, ia_score=$4, published_at=$5, created_at=NOW() WHERE id=$6',
+                [offre.intitule, (offre.description||'').slice(0,3000), tags, score, pubDate, exists.rows[0].id]
+              );
+              total++;
+            }
           }
         } catch(e) {}
       }

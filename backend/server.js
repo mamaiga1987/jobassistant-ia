@@ -2038,3 +2038,65 @@ app.post('/api/jobs/deduplicate', async (req, res) => {
     res.json({ deleted: r.rowCount, message: r.rowCount+' doublons supprimés' });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── MÉTIERS CIBLÉS ────────────────────────────────────────────────────────────
+app.get('/api/metiers', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM ja_metiers_cibles ORDER BY actif DESC, metier ASC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.post('/api/metiers', async (req, res) => {
+  try {
+    const { metier, requetes } = req.body;
+    const r = await pool.query(
+      'INSERT INTO ja_metiers_cibles (metier, requetes) VALUES ($1,$2) RETURNING *',
+      [metier, requetes||[metier]]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.patch('/api/metiers/:id', async (req, res) => {
+  try {
+    const { metier, requetes, actif } = req.body;
+    const r = await pool.query(
+      'UPDATE ja_metiers_cibles SET metier=COALESCE($1,metier), requetes=COALESCE($2,requetes), actif=COALESCE($3,actif) WHERE id=$4 RETURNING *',
+      [metier, requetes, actif, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+app.delete('/api/metiers/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ja_metiers_cibles WHERE id=$1',[req.params.id]);
+    res.json({success:true});
+  } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// Relancer collecte avec nouveaux métiers
+app.post('/api/metiers/relancer-collecte', async (req, res) => {
+  try {
+    const metiers = await pool.query('SELECT metier, requetes FROM ja_metiers_cibles WHERE actif=true');
+    
+    // Générer dynamiquement les requêtes FT
+    const requetes = [];
+    metiers.rows.forEach(m => {
+      (m.requetes||[m.metier]).forEach(r => requetes.push(r));
+    });
+
+    res.json({ success:true, message: `Collecte lancée avec ${requetes.length} requêtes`, requetes });
+    
+    // Lancer collecte en background
+    const { spawn } = require('child_process');
+    const child = spawn('node', ['collector_ft_massive.js'], {
+      cwd: '/opt/jobassistant/backend',
+      detached: true,
+      stdio: 'ignore',
+      env: {...process.env, CUSTOM_QUERIES: JSON.stringify(requetes)}
+    });
+    child.unref();
+  } catch(e) { res.status(500).json({error:e.message}); }
+});

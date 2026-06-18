@@ -40,6 +40,7 @@ const navItems = [
   {id:'portfolio',icon:<Star size={18}/>,label:'Portfolio projets'},
   {id:'agenda',icon:<Bell size={18}/>,label:'Agenda recherche'},
   {id:'blacklist',icon:<X size={18}/>,label:'Blacklist entreprises'},
+  {id:'metiers',icon:<Briefcase size={18}/>,label:'Mes metiers cibles'},
   {id:'stats',icon:<Briefcase size={18}/>,label:'Statistiques avancees'},
   {id:'questions',icon:<FileText size={18}/>,label:'Banque de questions'},
   {id:'formations',icon:<Star size={18}/>,label:'Formations recommandees'},
@@ -1063,6 +1064,115 @@ const StatsAvanceesPage = () => {
   );
 };
 
+const MetiersCiblesPage = () => {
+  const [metiers, setMetiers] = React.useState([]);
+  const [showForm, setShowForm] = React.useState(false);
+  const [form, setForm] = React.useState({metier:'', requetes:''});
+  const [editing, setEditing] = React.useState(null);
+  const [msg, setMsg] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(()=>{ axios.get(API+'/metiers').then(r=>setMetiers(r.data)); },[]);
+
+  const add = async () => {
+    if(!form.metier) return;
+    const requetes = form.requetes ? form.requetes.split(',').map(r=>r.trim()).filter(Boolean) : [form.metier];
+    const r = await axios.post(API+'/metiers', {metier:form.metier, requetes});
+    setMetiers(m=>[...m, r.data]);
+    setForm({metier:'', requetes:''});
+    setShowForm(false);
+  };
+
+  const toggle = async (m) => {
+    const r = await axios.patch(API+'/metiers/'+m.id, {actif:!m.actif});
+    setMetiers(ms=>ms.map(x=>x.id===m.id?r.data:x));
+  };
+
+  const remove = async (id) => {
+    await axios.delete(API+'/metiers/'+id);
+    setMetiers(ms=>ms.filter(x=>x.id!==id));
+  };
+
+  const relancerCollecte = async () => {
+    setLoading(true);
+    setMsg('Collecte en cours...');
+    const r = await axios.post(API+'/metiers/relancer-collecte');
+    setMsg('✅ '+r.data.message);
+    setLoading(false);
+    setTimeout(()=>setMsg(''),5000);
+  };
+
+  const actifs = metiers.filter(m=>m.actif);
+  const inactifs = metiers.filter(m=>!m.actif);
+
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:12,background:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.3)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#a78bfa',marginBottom:4}}>{actifs.length} métiers actifs</div>
+        <div style={{fontSize:11,color:'#64748b',marginBottom:10}}>La collecte cherche ces métiers sur France Travail et Indeed</div>
+        <button onClick={relancerCollecte} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13}}>
+          {loading?'Collecte en cours...':'🚀 Relancer la collecte maintenant'}
+        </button>
+        {msg&&<div style={{fontSize:12,color:'#22c55e',marginTop:8,textAlign:'center'}}>{msg}</div>}
+      </div>
+
+      <button onClick={()=>setShowForm(!showForm)} style={{...G.btn,width:'100%',marginBottom:12}}>
+        + Ajouter un métier ciblé
+      </button>
+
+      {showForm&&(
+        <div style={{...G.card,marginBottom:12}}>
+          <input value={form.metier} onChange={e=>setForm({...form,metier:e.target.value})} 
+            placeholder="Ex: Business Analyst" style={{...G.inp,marginBottom:8,fontSize:12}}/>
+          <input value={form.requetes} onChange={e=>setForm({...form,requetes:e.target.value})} 
+            placeholder="Requetes séparées par virgule: business analyst, analyste metier, BA" 
+            style={{...G.inp,marginBottom:8,fontSize:12}}/>
+          <div style={{fontSize:10,color:'#64748b',marginBottom:8}}>Les requêtes sont utilisées pour chercher les offres sur France Travail</div>
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={add} style={{...G.btn,padding:'8px 16px',fontSize:12}}>Ajouter</button>
+            <button onClick={()=>setShowForm(false)} style={{...G.btn,padding:'8px 16px',fontSize:12,background:'rgba(100,116,139,0.2)'}}>Annuler</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{fontSize:12,fontWeight:700,color:'#22c55e',marginBottom:8}}>✅ Actifs ({actifs.length})</div>
+      {actifs.map(m=>(
+        <div key={m.id} style={{...G.card,marginBottom:8,borderLeft:'3px solid #22c55e'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div style={{flex:1}}>
+              <div style={{fontSize:13,fontWeight:700,color:'#e2e8f0'}}>{m.metier}</div>
+              <div style={{fontSize:10,color:'#64748b',marginTop:2}}>
+                Requêtes: {(m.requetes||[]).join(', ')}
+              </div>
+            </div>
+            <div style={{display:'flex',gap:6}}>
+              <button onClick={()=>toggle(m)} style={{...G.btn,padding:'3px 8px',fontSize:10,background:'rgba(245,158,11,0.2)',color:'#f59e0b'}}>Désactiver</button>
+              <button onClick={()=>remove(m.id)} style={{background:'transparent',border:'none',color:'#ef4444',cursor:'pointer'}}><Trash2 size={14}/></button>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {inactifs.length>0&&(
+        <>
+          <div style={{fontSize:12,fontWeight:700,color:'#ef4444',marginBottom:8,marginTop:12}}>⏸ Inactifs ({inactifs.length})</div>
+          {inactifs.map(m=>(
+            <div key={m.id} style={{...G.card,marginBottom:8,borderLeft:'3px solid #ef4444',opacity:0.6}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <div style={{fontSize:13,color:'#94a3b8'}}>{m.metier}</div>
+                <div style={{display:'flex',gap:6}}>
+                  <button onClick={()=>toggle(m)} style={{...G.btn,padding:'3px 8px',fontSize:10,background:'rgba(34,197,94,0.2)',color:'#22c55e'}}>Activer</button>
+                  <button onClick={()=>remove(m.id)} style={{background:'transparent',border:'none',color:'#ef4444',cursor:'pointer'}}><Trash2 size={14}/></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+};
+
 const BlacklistPage = () => {
   const [list, setList] = React.useState([]);
   const [form, setForm] = React.useState({company:'',raison:''});
@@ -1572,7 +1682,7 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',stats:'Statistiques avancees',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences'};
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
@@ -1587,6 +1697,7 @@ export default function App() {
       case 'portfolio': return <PortfolioPage key={Date.now()}/>;
       case 'agenda': return <AgendaPage key={Date.now()}/>;
       case 'blacklist': return <BlacklistPage key={Date.now()}/>;
+      case 'metiers': return <MetiersCiblesPage key={Date.now()}/>;
       case 'stats': return <StatsAvanceesPage key={Date.now()}/>;
       case 'questions': return <BanqueQuestionsPage key={Date.now()}/>;
       case 'formations': return <FormationsPage key={Date.now()}/>;

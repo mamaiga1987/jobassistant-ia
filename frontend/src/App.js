@@ -390,8 +390,8 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('date');
-  const [minScore, setMinScore] = useState(50);
+  const [sort, setSort] = useState('score');
+  const [minScore, setMinScore] = useState(60);
   const [sourceFilter, setSourceFilter] = useState('tous');
   const [detail, setDetail] = useState(null);
   const [compareIds, setCompareIds] = useState([]);
@@ -402,7 +402,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
     const load = async () => {
       setLoading(true);
       try {
-        let url = search ? API+'/search?q='+encodeURIComponent(search)+'&sort='+sort : API+'/jobs?limit=200&sort='+sort+'&minScore='+minScore;
+        let url = search ? API+'/search?q='+encodeURIComponent(search)+'&sort='+sort : API+'/jobs?limit=500&sort='+sort+'&minScore='+minScore;
         if (sourceFilter && sourceFilter !== 'tous') url += '&source='+encodeURIComponent(sourceFilter);
         const r = await axios.get(url);
         setJobs(Array.isArray(r.data)?r.data:[]);
@@ -518,7 +518,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
         </div>
       </div>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
-        <div style={{fontSize:12,color:'#64748b'}}>{filtered.length} offres {minScore>0?'>= '+minScore+'%':''}</div>
+        <div style={{fontSize:12,color:'#64748b'}}>{filtered.length} offres {minScore>0?'>= '+minScore+'%':''} · 21 derniers jours</div>
         {compareIds.length>0&&<button onClick={lancerComparaison} style={{...G.btn,padding:'6px 14px',fontSize:12,background:'rgba(16,185,129,0.2)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>⚖ Comparer ({compareIds.length})</button>}
       </div>
       {loading&&<div style={{textAlign:'center',padding:40,color:'#64748b'}}>Chargement...</div>}

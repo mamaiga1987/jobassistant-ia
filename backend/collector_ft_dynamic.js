@@ -2,8 +2,8 @@ const axios = require('axios');
 const https = require('https');
 const { Pool } = require('pg');
 
-const FT_CLIENT_ID = 'PAR_jobassistantia_f68a7f33ad46eaddfb1c2a825cec0137046951bd0005c7011515cce57421dd89';
-const FT_CLIENT_SECRET = '9089ff106e4565a5eae1a1a1ba03f1b1dc7fd527a856fd1022955fb60ec2a4ca';
+const FT_CLIENT_ID = 'PAR_jobassistantia_e4067ff9061b93885dbf20a4781ce86b657007da21cd91505f7bbdd0d7a66bc1';
+const FT_CLIENT_SECRET = 'a5797d080b488116429d967bb4ccb57e652921c2491cab16d0d9c22c9a4cb4df';
 
 const pool = new Pool({
   host: process.env.DB_HOST || 'superset-db',
@@ -45,13 +45,17 @@ function calcScore(title, description, tags) {
 }
 
 async function collectForQuery(token, query, dept) {
+  console.log('  Query:', query, 'Dept:', dept);
   try {
     const r = await axios.get('https://api.francetravail.io/partenaire/offresdemploi/v2/offres/search', {
       headers: { Authorization: `Bearer ${token}` },
-      params: { motsCles: query, departement: dept, range: '0-49', typeContrat: 'CDI,CDD,MIS', niveauFormation: '6,7' }
+      params: { motsCles: query, departement: dept, range: '0-49', typeContrat: 'CDI,CDD,MIS' }
     });
     return r.data.resultats || [];
-  } catch(e) { return []; }
+  } catch(e) { 
+    console.log('    ERREUR:', e.response?.status, e.response?.data || e.message);
+    return []; 
+  }
 }
 
 async function main() {
@@ -74,6 +78,7 @@ async function main() {
   for(const query of requetes) {
     for(const dept of DEPTS_IDF) {
       const offres = await collectForQuery(token, query, dept);
+      if(offres.length > 0) console.log('    -> ', offres.length, 'offres trouvees');
       for(const offre of offres) {
         try {
           const tags = [];

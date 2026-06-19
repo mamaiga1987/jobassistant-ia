@@ -6,8 +6,8 @@ const pool = new Pool({
   database: 'jobassistant', user: 'jobassistant', password: 'jobassistant2026'
 });
 
-const FT_CLIENT_ID = 'PAR_jobassistantia_f68a7f33ad46eaddfb1c2a825cec0137046951bd0005c7011515cce57421dd89';
-const FT_CLIENT_SECRET = '9089ff106e4565a5eae1a1a1ba03f1b1dc7fd527a856fd1022955fb60ec2a4ca';
+const FT_CLIENT_ID = 'PAR_jobassistantia_e4067ff9061b93885dbf20a4781ce86b657007da21cd91505f7bbdd0d7a66bc1';
+const FT_CLIENT_SECRET = 'a5797d080b488116429d967bb4ccb57e652921c2491cab16d0d9c22c9a4cb4df';
 const DEPTS = ['75','92','93','94','91','78','95'];
 
 const QUERIES = [

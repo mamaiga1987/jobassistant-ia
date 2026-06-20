@@ -52,20 +52,27 @@ function calcScore(profil, title, description, tags) {
   const metiersTitre = ['product owner','it product manager','data product manager','moa','amoa','chef de projet','analytics engineer','data engineer','ai engineer','data analyst','business analyst','data scientist','scrum master','lead data','architecte data','consultant data','rag engineer'];
   let titleHits = 0;
   metiersTitre.forEach(function(m) { if(titleL.includes(m)) titleHits++; });
-  score += Math.min(titleHits * 12, 40);
+  score += Math.min(titleHits * 8, 28);
 
   if(titleL.includes('product owner') && (titleL.includes('data')||titleL.includes('ia')||titleL.includes('bi'))) score += 12;
   if((titleL.includes('moa')||titleL.includes('maîtrise')) && (titleL.includes('data')||titleL.includes('si')||titleL.includes('ia'))) score += 12;
   if(titleL.includes('chef de projet') && (titleL.includes('data')||titleL.includes('moa')||titleL.includes('bi')||titleL.includes('ia'))) score += 10;
-  if(titleL.includes('data engineer')||titleL.includes('analytics engineer')) score += 10;
-  if(titleL.includes('ai engineer')||titleL.includes('rag')||titleL.includes('llm')) score += 12;
-  if(titleL.includes('senior')||titleL.includes('lead')||titleL.includes('confirmé')) score += 5;
-  score = Math.min(score, 40);
+  if(titleL.includes('data engineer')||titleL.includes('analytics engineer')) score += 7;
+  if(titleL.includes('ai engineer')||titleL.includes('rag')||titleL.includes('llm')) score += 8;
+  if(titleL.includes('senior')||titleL.includes('lead')||titleL.includes('confirmé')) score += 3;
+  score = Math.min(score, 28);
 
   var raresComps = ['rag','pgvector','apache superset','langchain','llamaindex','langgraph','mistral','openai api','embeddings','mlops','headless bi','airbyte','clickhouse'];
   var raresHits = 0;
   raresComps.forEach(function(c) { if(full.includes(c)) raresHits++; });
   score += Math.min(raresHits * 5, 20);
+
+  // Penalite pour stack technique exigee absente du profil (hyperscalers cloud, big data lourd)
+  var stackEloignee = ['gcp','google cloud','bigquery','dataflow','hadoop','spark','kafka','databricks','aws','azure','snowflake','cloud composer','vertex ai'];
+  var stackEloigneeHits = 0;
+  stackEloignee.forEach(function(c) { if(full.includes(c)) stackEloigneeHits++; });
+  if(stackEloigneeHits >= 3) score -= 15;
+  else if(stackEloigneeHits >= 1) score -= 8;
 
   var stdComps = ['sql','python','power bi','agile','scrum','docker','n8n','etl','git','api','kpi','roadmap','backlog','data','bi','analytics'];
   var stdHits = 0;

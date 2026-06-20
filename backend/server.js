@@ -1007,7 +1007,7 @@ app.get('/api/profil/cv-pdf-download', async (req, res) => {
     // En-tête
     doc.fontSize(22).fillColor('#1e3a5f').text(profil.nom||'Mohamed Assalia Maiga', {align:'left'});
     doc.fontSize(13).fillColor('#2d6a9f').text(profil.titre||'Product Owner Data & IA', {align:'left'});
-    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · mmohamedassalia6@gmail.com · Disponible immédiatement');
+    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement');
     doc.moveDown(0.5);
 
     // Ligne séparatrice
@@ -2293,7 +2293,7 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
 
     doc.fontSize(22).fillColor('#1e3a5f').text(d.nom||'Candidat');
     doc.fontSize(13).fillColor('#2d6a9f').text(d.titre_accroche||'');
-    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · mmohamedassalia6@gmail.com · Disponible immédiatement');
+    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement');
     doc.moveDown(0.5);
     doc.moveTo(50,doc.y).lineTo(545,doc.y).strokeColor('#2d6a9f').lineWidth(2).stroke();
     doc.moveDown(0.5);
@@ -2329,4 +2329,191 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
 
     doc.end();
   } catch(e) { res.status(500).json({error:e.message}); }
+});
+
+// ── CV OPTIMISÉ POUR OFFRE COLLÉE LIBREMENT (hors DB) ─────────────────────────
+app.post('/api/cv-offre-libre/generer', async (req, res) => {
+  try {
+    const { titre_offre, texte_offre } = req.body;
+    if(!texte_offre || texte_offre.length < 30) {
+      return res.status(400).json({ error: "Texte de l'offre trop court ou manquant." });
+    }
+
+    const profil = await getProfil();
+    const fs = require('fs');
+    const { execSync } = require('child_process');
+    let cvText = '';
+    if(profil.cv_path && fs.existsSync(profil.cv_path)) {
+      try { cvText = execSync(`pdftotext "${profil.cv_path}" -`, {encoding:'utf8', timeout:15000}); }
+      catch(e) { console.log('pdftotext error:', e.message); }
+    }
+    if(cvText.length < 100) {
+      return res.status(400).json({error:'Aucun CV PDF uploadé. Uploadez votre CV dans Mon CV & Profil avant de générer une version optimisée.'});
+    }
+
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_cv_optimises (
+      id SERIAL PRIMARY KEY, job_id INTEGER, data JSONB, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await pool.query(`ALTER TABLE ja_cv_optimises ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'`);
+    await pool.query(`ALTER TABLE ja_cv_optimises ADD COLUMN IF NOT EXISTS offre_titre TEXT`);
+
+    const pending = await pool.query('INSERT INTO ja_cv_optimises (job_id, data, status, offre_titre) VALUES (NULL,$1,$2,$3) RETURNING id',
+      [JSON.stringify({}), 'pending', titre_offre || 'Offre collée']);
+    const cvOptimiseId = pending.rows[0].id;
+
+    res.json({ status: 'pending', cv_optimise_id: cvOptimiseId });
+
+    (async () => {
+      try {
+        const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+        async function callClaude(prompt, maxTokens) {
+          const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,messages:[{role:'user',content:prompt}]});
+          return new Promise((resolve) => {
+            const https = require('https');
+            const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
+            r.on('error',()=>resolve(null));r.write(body);r.end();
+          });
+        }
+
+        const extractPrompt = `Voici un CV brut extrait d'un PDF. Liste de maniere EXHAUSTIVE toutes les experiences professionnelles presentes (emplois, stages, missions, projets personnels/associatifs), meme les plus courtes ou anciennes. N'en oublie AUCUNE.
+
+CV:
+${cvText.slice(0,12000)}
+
+Retourne UNIQUEMENT un JSON:
+{"experiences_brutes": [{"titre":"...", "entreprise":"...", "periode":"...", "description_brute":"texte original complet de cette experience, missions et stack inclus"}]}
+Une entree par experience distincte, dans l'ordre du CV. Retourne UNIQUEMENT le JSON.`;
+
+        const extractResult = await callClaude(extractPrompt, 3000);
+        const extracted = JSON.parse((extractResult||'{}').replace(/```json|```/g,'').trim());
+        const experiencesBrutes = extracted.experiences_brutes || [];
+
+        const prompt = `Tu es un expert en rédaction de CV. Voici le CV REEL d'un candidat (deja decoupe en experiences exhaustives) et une offre d'emploi precise que le candidat a trouvee lui-meme (copiee-collee depuis une autre plateforme).
+
+LISTE EXHAUSTIVE ET FIGEE DES EXPERIENCES DU CANDIDAT (tu dois TOUTES les reprendre, dans cet ordre, sans en omettre une seule):
+${JSON.stringify(experiencesBrutes, null, 2)}
+
+CV COMPLET POUR CONTEXTE (profil, competences, certifications, formation):
+${cvText.slice(0,12000)}
+
+OFFRE VISEE (texte brut colle par le candidat, peut contenir du bruit ou de la mise en forme imparfaite):
+Titre indique: ${titre_offre || 'Non precise'}
+Texte complet de l'offre:
+${texte_offre.slice(0,3000)}
+
+TACHE: Reecris ce CV pour maximiser les chances de matcher avec CETTE offre precise:
+1. REGLE ABSOLUE: le tableau "experiences" en sortie doit contenir EXACTEMENT ${experiencesBrutes.length} entrees, une par experience listee ci-dessus, dans le meme ordre, aucune fusion ni omission autorisee.
+2. N'invente jamais une expérience, compétence ou certification absente du CV
+3. Reformule chaque experience (titre, description) pour mettre en avant ce qui est pertinent pour cette offre, en restant fidele au contenu brut fourni
+4. Adapte le titre/accroche general pour refleter le vocabulaire de l'offre (sans mentir)
+5. Réordonne les compétences techniques: celles demandées dans l'offre en premier
+6. Si le texte de l'offre est imparfait ou tronque, fais de ton mieux pour en extraire le sens et les mots-cles utiles
+
+Retourne un JSON structuré:
+{
+  "nom": "...",
+  "titre_accroche": "titre adapte a cette offre",
+  "resume": "2-3 phrases d'accroche adaptees a cette offre, basees sur le CV reel",
+  "competences_ordonnees": ["liste reordonnee, pertinentes pour cette offre en premier"],
+  "experiences": [
+    {"titre":"...", "periode":"...", "entreprise":"...", "description":"reformulee pour cette offre"}
+  ],
+  "certifications": ["liste du CV original"],
+  "formation": "du CV original",
+  "points_cles_mis_en_avant": ["2-3 elements du CV reel particulierement pertinents pour cette offre"]
+}
+RAPPEL CRITIQUE: experiences doit avoir EXACTEMENT ${experiencesBrutes.length} elements. Retourne UNIQUEMENT le JSON.`;
+
+        const result = await callClaude(prompt, 4000);
+        const data = JSON.parse((result||'{}').replace(/```json|```/g,'').trim());
+
+        if((data.experiences||[]).length < experiencesBrutes.length) {
+          const titresPresents = (data.experiences||[]).map(e => (e.titre||'').toLowerCase());
+          experiencesBrutes.forEach(eb => {
+            const dejaPresent = titresPresents.some(t => t.includes((eb.entreprise||'').toLowerCase().slice(0,8)));
+            if(!dejaPresent) {
+              data.experiences = data.experiences || [];
+              data.experiences.push({
+                titre: eb.titre, periode: eb.periode, entreprise: eb.entreprise,
+                description: eb.description_brute
+              });
+            }
+          });
+        }
+
+        await pool.query('UPDATE ja_cv_optimises SET data=$1, status=$2 WHERE id=$3',
+          [JSON.stringify(data), 'done', cvOptimiseId]);
+      } catch(e) {
+        console.log('Erreur generation CV offre libre background:', e.message);
+        await pool.query('UPDATE ja_cv_optimises SET status=$1 WHERE id=$2', ['error', cvOptimiseId]);
+      }
+    })();
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── TÉLÉCHARGER CV OPTIMISÉ EN WORD (.docx) ───────────────────────────────────
+app.get('/api/cv-optimise/:id/docx', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT data FROM ja_cv_optimises WHERE id=$1', [req.params.id]);
+    if(r.rows.length === 0) return res.status(404).json({error:'CV optimisé non trouvé'});
+    const d = r.rows[0].data;
+
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
+
+    const children = [];
+
+    children.push(new Paragraph({
+      children: [new TextRun({ text: d.nom || 'Candidat', bold: true, size: 36, color: '1e3a5f' })],
+      spacing: { after: 80 }
+    }));
+    children.push(new Paragraph({
+      children: [new TextRun({ text: d.titre_accroche || '', size: 24, color: '2d6a9f' })],
+      spacing: { after: 60 }
+    }));
+    children.push(new Paragraph({
+      children: [new TextRun({ text: 'Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement', size: 18, color: '64748b' })],
+      spacing: { after: 200 }
+    }));
+
+    children.push(new Paragraph({ text: 'PROFIL', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
+    children.push(new Paragraph({ children: [new TextRun({ text: d.resume || '', size: 20 })], spacing: { after: 200 } }));
+
+    if((d.certifications||[]).length > 0) {
+      children.push(new Paragraph({ text: 'CERTIFICATIONS', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: (d.certifications||[]).join(' · '), size: 20 })], spacing: { after: 200 } }));
+    }
+
+    if((d.competences_ordonnees||[]).length > 0) {
+      children.push(new Paragraph({ text: 'COMPÉTENCES TECHNIQUES', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: (d.competences_ordonnees||[]).join(', '), size: 20 })], spacing: { after: 200 } }));
+    }
+
+    children.push(new Paragraph({ text: 'EXPÉRIENCES PROFESSIONNELLES', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
+    (d.experiences||[]).forEach(e => {
+      children.push(new Paragraph({
+        children: [new TextRun({ text: (e.titre||'') + (e.entreprise ? ' — ' + e.entreprise : ''), bold: true, size: 20, color: '1e3a5f' })],
+        spacing: { before: 100, after: 20 }
+      }));
+      children.push(new Paragraph({
+        children: [new TextRun({ text: e.periode || '', italics: true, size: 18, color: '64748b' })],
+        spacing: { after: 60 }
+      }));
+      (e.description || '').split('\n').forEach(line => {
+        if(line.trim()) {
+          children.push(new Paragraph({ children: [new TextRun({ text: line.trim().replace(/^[-●]\s*/, '• '), size: 19 })], spacing: { after: 40 } }));
+        }
+      });
+    });
+
+    if(d.formation) {
+      children.push(new Paragraph({ text: 'FORMATION', heading: HeadingLevel.HEADING_2, spacing: { before: 150, after: 80 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: d.formation, size: 20 })] }));
+    }
+
+    const doc = new Document({ sections: [{ properties: {}, children }] });
+    const buffer = await Packer.toBuffer(doc);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+    res.setHeader('Content-Disposition', 'attachment; filename=CV_Optimise_' + (d.nom||'candidat').replace(/\s/g,'_') + '.docx');
+    res.send(buffer);
+  } catch(e) { res.status(500).json({ error: e.message }); }
 });

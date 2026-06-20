@@ -42,6 +42,7 @@ const navItems = [
   {id:'blacklist',icon:<X size={18}/>,label:'Blacklist entreprises'},
   {id:'metiers',icon:<Briefcase size={18}/>,label:'Mes metiers cibles'},
   {id:'stats',icon:<Briefcase size={18}/>,label:'Statistiques avancees'},
+  {id:'offre-libre',icon:<FileText size={18}/>,label:'Coller une offre'},
   {id:'questions',icon:<FileText size={18}/>,label:'Banque de questions'},
   {id:'formations',icon:<Star size={18}/>,label:'Formations recommandees'},
   {id:'veille-comp',icon:<Search size={18}/>,label:'Veille competences'},
@@ -1266,6 +1267,120 @@ const MetiersCiblesPage = () => {
   );
 };
 
+const OffreLibrePage = () => {
+  const [titreOffre, setTitreOffre] = React.useState('');
+  const [texteOffre, setTexteOffre] = React.useState('');
+  const [loading, setLoading] = React.useState(false);
+  const [progressMsg, setProgressMsg] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [data, setData] = React.useState(null);
+
+  const generer = async () => {
+    if(texteOffre.trim().length < 30) {
+      setError('Collez le texte complet de l\'offre (au moins quelques lignes).');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    setData(null);
+    setProgressMsg('Demarrage de la generation...');
+    try {
+      const start = await axios.post(API+'/cv-offre-libre/generer', {
+        titre_offre: titreOffre, texte_offre: texteOffre
+      }, {timeout: 15000});
+      if(start.data.error) {
+        setError(start.data.error);
+        setLoading(false);
+        return;
+      }
+      const cvId = start.data.cv_optimise_id;
+      setProgressMsg('Analyse de l\'offre et adaptation du CV (30-70s)...');
+
+      let attempts = 0;
+      const maxAttempts = 24;
+      const poll = async () => {
+        attempts++;
+        try {
+          const r = await axios.get(API+'/cv-optimise/'+cvId+'/status', {timeout: 10000});
+          if(r.data.status === 'done') {
+            setData(r.data);
+            setLoading(false);
+          } else if(r.data.status === 'error') {
+            setError('La generation a echoue, veuillez reessayer.');
+            setLoading(false);
+          } else if(attempts >= maxAttempts) {
+            setError('La generation prend trop de temps, veuillez reessayer.');
+            setLoading(false);
+          } else {
+            setProgressMsg('Reformulation en cours... ('+attempts*5+'s)');
+            setTimeout(poll, 5000);
+          }
+        } catch(e) {
+          if(attempts >= maxAttempts) {
+            setError('Erreur lors de la verification du statut.');
+            setLoading(false);
+          } else {
+            setTimeout(poll, 5000);
+          }
+        }
+      };
+      setTimeout(poll, 5000);
+    } catch(e) {
+      setError(e.response?.data?.error || 'Erreur lors du demarrage de la generation');
+      setLoading(false);
+    }
+  };
+
+  const telechargerPDF = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/pdf', '_blank');
+  const telechargerDOCX = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/docx', '_blank');
+
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:12,background:'rgba(168,85,247,0.06)',border:'1px solid rgba(168,85,247,0.2)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#c084fc',marginBottom:6}}>📋 Coller une offre trouvee ailleurs</div>
+        <div style={{fontSize:11,color:'#94a3b8',lineHeight:1.6}}>Trouve une offre sur LinkedIn, Welcome to the Jungle, le site d'une entreprise, etc. ? Colle son contenu ici pour generer un CV optimise specifiquement pour cette offre, base sur votre CV reel.</div>
+      </div>
+
+      <input value={titreOffre} onChange={e=>setTitreOffre(e.target.value)} placeholder="Titre du poste (ex: Data Product Manager - Fintech Paris)" style={{...G.inp,marginBottom:8,fontSize:13}}/>
+      <textarea value={texteOffre} onChange={e=>setTexteOffre(e.target.value)} placeholder="Collez ici le texte complet de l'offre (description, missions, profil recherche...)" style={{...G.inp,height:220,resize:'vertical',fontSize:12,marginBottom:12,fontFamily:'inherit'}}/>
+
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'12px',fontSize:13,background:'rgba(168,85,247,0.18)',color:'#c084fc',border:'1px solid rgba(168,85,247,0.35)',marginBottom:12}}>
+        {loading?(progressMsg||'Generation en cours...'):'📄 Générer mon CV optimisé pour cette offre'}
+      </button>
+
+      {error && (
+        <div style={{...G.card,marginBottom:12,background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',color:'#fca5a5',fontSize:12}}>
+          {error}
+        </div>
+      )}
+
+      {data && (
+        <div style={{...G.card,background:'rgba(168,85,247,0.05)',border:'1px solid rgba(168,85,247,0.2)'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#c084fc',marginBottom:8}}>📄 CV optimisé généré</div>
+          <div style={{fontSize:12,color:'#e2e8f0',marginBottom:6}}><strong>Titre adapté:</strong> {data.titre_accroche}</div>
+          <div style={{fontSize:11,color:'#94a3b8',marginBottom:10,lineHeight:1.6}}>{data.resume}</div>
+          {data.points_cles_mis_en_avant && (
+            <div style={{marginBottom:12}}>
+              <div style={{fontSize:11,color:'#c084fc',fontWeight:600,marginBottom:4}}>Points mis en avant pour cette offre:</div>
+              {data.points_cles_mis_en_avant.map((p,i)=>(
+                <div key={i} style={{fontSize:11,color:'#94a3b8',marginBottom:2}}>✨ {p}</div>
+              ))}
+            </div>
+          )}
+          <div style={{display:'flex',gap:8}}>
+            <button onClick={telechargerPDF} style={{...G.btn,flex:1,padding:'10px',fontSize:12,background:'rgba(168,85,247,0.3)',color:'#c084fc'}}>
+              📥 PDF
+            </button>
+            <button onClick={telechargerDOCX} style={{...G.btn,flex:1,padding:'10px',fontSize:12,background:'rgba(59,130,246,0.3)',color:'#60a5fa'}}>
+              📥 Word
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const BlacklistPage = () => {
   const [list, setList] = React.useState([]);
   const [form, setForm] = React.useState({company:'',raison:''});
@@ -1775,7 +1890,7 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences'};
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
@@ -1792,6 +1907,7 @@ export default function App() {
       case 'blacklist': return <BlacklistPage key={Date.now()}/>;
       case 'metiers': return <MetiersCiblesPage key={Date.now()}/>;
       case 'stats': return <StatsAvanceesPage key={Date.now()}/>;
+      case 'offre-libre': return <OffreLibrePage key={Date.now()}/>;
       case 'questions': return <BanqueQuestionsPage key={Date.now()}/>;
       case 'formations': return <FormationsPage key={Date.now()}/>;
       case 'veille-comp': return <VeilleCompetencesPage key={Date.now()}/>;

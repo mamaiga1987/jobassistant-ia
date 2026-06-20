@@ -2171,23 +2171,63 @@ app.post('/api/jobs/:id/cv-optimise', async (req, res) => {
       return res.status(400).json({error:'Aucun CV PDF uploadé. Uploadez votre CV dans Mon CV & Profil avant de générer une version optimisée.'});
     }
 
-    const prompt = `Tu es un expert en rédaction de CV. Voici le CV REEL et COMPLET d'un candidat, et une offre d'emploi précise.
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_cv_optimises (
+      id SERIAL PRIMARY KEY, job_id INTEGER, data JSONB, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    // Garantir que la colonne status existe meme si la table preexistait sans elle
+    await pool.query(`ALTER TABLE ja_cv_optimises ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'pending'`);
 
-CV ORIGINAL DU CANDIDAT (verite absolue, ne jamais inventer d'experience non presente ici):
-${cvText.slice(0,4000)}
+    const pending = await pool.query('INSERT INTO ja_cv_optimises (job_id, data, status) VALUES ($1,$2,$3) RETURNING id',
+      [req.params.id, JSON.stringify({}), 'pending']);
+    const cvOptimiseId = pending.rows[0].id;
+
+    // Repondre immediatement avec l'ID a poller, pour eviter le timeout proxy (60s)
+    res.json({ status: 'pending', cv_optimise_id: cvOptimiseId });
+
+    // Continuer le travail en arriere-plan, sans bloquer la reponse HTTP
+    (async () => {
+      try {
+        const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+        async function callClaude(prompt, maxTokens) {
+          const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,messages:[{role:'user',content:prompt}]});
+          return new Promise((resolve) => {
+            const https = require('https');
+            const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
+            r.on('error',()=>resolve(null));r.write(body);r.end();
+          });
+        }
+
+        const extractPrompt = `Voici un CV brut extrait d'un PDF. Liste de maniere EXHAUSTIVE toutes les experiences professionnelles presentes (emplois, stages, missions, projets personnels/associatifs), meme les plus courtes ou anciennes. N'en oublie AUCUNE.
+
+CV:
+${cvText.slice(0,12000)}
+
+Retourne UNIQUEMENT un JSON:
+{"experiences_brutes": [{"titre":"...", "entreprise":"...", "periode":"...", "description_brute":"texte original complet de cette experience, missions et stack inclus"}]}
+Une entree par experience distincte, dans l'ordre du CV. Retourne UNIQUEMENT le JSON.`;
+
+        const extractResult = await callClaude(extractPrompt, 3000);
+        const extracted = JSON.parse((extractResult||'{}').replace(/```json|```/g,'').trim());
+        const experiencesBrutes = extracted.experiences_brutes || [];
+
+        const prompt = `Tu es un expert en rédaction de CV. Voici le CV REEL d'un candidat (deja decoupe en experiences exhaustives) et une offre d'emploi précise.
+
+LISTE EXHAUSTIVE ET FIGEE DES EXPERIENCES DU CANDIDAT (tu dois TOUTES les reprendre, dans cet ordre, sans en omettre une seule):
+${JSON.stringify(experiencesBrutes, null, 2)}
+
+CV COMPLET POUR CONTEXTE (profil, competences, certifications, formation):
+${cvText.slice(0,12000)}
 
 OFFRE VISEE:
 Titre: ${job.title}
 Entreprise: ${job.company||'Non precise'}
 Description complete: ${(job.description||'').slice(0,1500)}
 
-TACHE: Réécris ce CV pour maximiser les chances de matcher avec CETTE offre precise, en respectant ces règles strictes:
-1. N'invente JAMAIS une expérience, compétence ou certification absente du CV original
-2. Réorganise et reformule les expériences existantes pour mettre en avant ce qui est pertinent pour cette offre
-3. Adapte le titre/accroche pour refleter le vocabulaire exact de l'offre (sans mentir)
-4. Réordonne les compétences techniques: celles demandées dans l'offre en premier
-5. Reformule les descriptions de mission pour utiliser les mots-cles de l'offre quand c'est honnete de le faire
-6. Garde un format CV professionnel standard
+TACHE: Reecris ce CV pour maximiser les chances de matcher avec CETTE offre precise:
+1. REGLE ABSOLUE: le tableau "experiences" en sortie doit contenir EXACTEMENT ${experiencesBrutes.length} entrees, une par experience listee ci-dessus, dans le meme ordre, aucune fusion ni omission autorisee.
+2. N'invente jamais une expérience, compétence ou certification absente du CV
+3. Reformule chaque experience (titre, description) pour mettre en avant ce qui est pertinent pour cette offre, en restant fidele au contenu brut fourni
+4. Adapte le titre/accroche general pour refleter le vocabulaire de l'offre (sans mentir)
+5. Réordonne les compétences techniques: celles demandées dans l'offre en premier
 
 Retourne un JSON structuré:
 {
@@ -2196,35 +2236,49 @@ Retourne un JSON structuré:
   "resume": "2-3 phrases d'accroche adaptees a cette offre, basees sur le CV reel",
   "competences_ordonnees": ["liste reordonnee, pertinentes pour cette offre en premier"],
   "experiences": [
-    {"titre":"...", "periode":"...", "entreprise":"...", "description":"reformulee pour cette offre, basee sur le CV reel"}
+    {"titre":"...", "periode":"...", "entreprise":"...", "description":"reformulee pour cette offre"}
   ],
   "certifications": ["liste du CV original"],
   "formation": "du CV original",
   "points_cles_mis_en_avant": ["2-3 elements du CV reel particulierement pertinents pour cette offre"]
 }
-Retourne UNIQUEMENT le JSON, base a 100% sur le contenu reel du CV fourni.`;
+RAPPEL CRITIQUE: experiences doit avoir EXACTEMENT ${experiencesBrutes.length} elements. Retourne UNIQUEMENT le JSON.`;
 
-    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
-    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,messages:[{role:'user',content:prompt}]});
-    const result = await new Promise((resolve) => {
-      const https = require('https');
-      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
-      r.on('error',()=>resolve(null));r.write(body);r.end();
-    });
+        const result = await callClaude(prompt, 4000);
+        const data = JSON.parse((result||'{}').replace(/```json|```/g,'').trim());
 
-    const data = JSON.parse(result.replace(/```json|```/g,'').trim());
+        if((data.experiences||[]).length < experiencesBrutes.length) {
+          const titresPresents = (data.experiences||[]).map(e => (e.titre||'').toLowerCase());
+          experiencesBrutes.forEach(eb => {
+            const dejaPresent = titresPresents.some(t => t.includes((eb.entreprise||'').toLowerCase().slice(0,8)));
+            if(!dejaPresent) {
+              data.experiences = data.experiences || [];
+              data.experiences.push({
+                titre: eb.titre, periode: eb.periode, entreprise: eb.entreprise,
+                description: eb.description_brute
+              });
+            }
+          });
+        }
 
-    // Stocker temporairement pour generation PDF
-    await pool.query(`CREATE TABLE IF NOT EXISTS ja_cv_optimises (
-      id SERIAL PRIMARY KEY, job_id INTEGER, data JSONB, created_at TIMESTAMP DEFAULT NOW())`);
-    const saved = await pool.query('INSERT INTO ja_cv_optimises (job_id, data) VALUES ($1,$2) RETURNING id',
-      [req.params.id, JSON.stringify(data)]);
-
-    res.json({ ...data, cv_optimise_id: saved.rows[0].id });
+        await pool.query('UPDATE ja_cv_optimises SET data=$1, status=$2 WHERE id=$3',
+          [JSON.stringify(data), 'done', cvOptimiseId]);
+      } catch(e) {
+        console.log('Erreur generation CV optimise background:', e.message);
+        await pool.query('UPDATE ja_cv_optimises SET status=$1 WHERE id=$2', ['error', cvOptimiseId]);
+      }
+    })();
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
-// ── TÉLÉCHARGER CV OPTIMISÉ PDF ───────────────────────────────────────────────
+app.get('/api/cv-optimise/:id/status', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT data, status FROM ja_cv_optimises WHERE id=$1', [req.params.id]);
+    if(r.rows.length === 0) return res.status(404).json({error:'Non trouvé'});
+    const row = r.rows[0];
+    res.json({ status: row.status, ...(row.status === 'done' ? row.data : {}), cv_optimise_id: req.params.id });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
   try {
     const r = await pool.query('SELECT data FROM ja_cv_optimises WHERE id=$1', [req.params.id]);
@@ -2264,7 +2318,7 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
     (d.experiences||[]).forEach(e=>{
       doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre+(e.entreprise?' — '+e.entreprise:''));
       doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode||'');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text(e.description||'');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/!'/g,'->'));
       doc.moveDown(0.3);
     });
 

@@ -239,16 +239,55 @@ const CVOptimise = ({ offre }) => {
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState('');
 
+  const [progressMsg, setProgressMsg] = React.useState('');
+
   const generer = async () => {
     setLoading(true);
     setError('');
+    setProgressMsg('Demarrage de la generation...');
     try {
-      const r = await axios.post(API+'/jobs/'+offre.id+'/cv-optimise');
-      setData(r.data);
+      const start = await axios.post(API+'/jobs/'+offre.id+'/cv-optimise', {}, {timeout: 15000});
+      if(start.data.error) {
+        setError(start.data.error);
+        setLoading(false);
+        return;
+      }
+      const cvId = start.data.cv_optimise_id;
+      setProgressMsg('Analyse du CV et reformulation en cours (30-60s)...');
+
+      let attempts = 0;
+      const maxAttempts = 24; // jusqu'a 2 minutes (24 x 5s)
+      const poll = async () => {
+        attempts++;
+        try {
+          const r = await axios.get(API+'/cv-optimise/'+cvId+'/status', {timeout: 10000});
+          if(r.data.status === 'done') {
+            setData(r.data);
+            setLoading(false);
+          } else if(r.data.status === 'error') {
+            setError('La generation a echoue, veuillez reessayer.');
+            setLoading(false);
+          } else if(attempts >= maxAttempts) {
+            setError('La generation prend trop de temps, veuillez reessayer.');
+            setLoading(false);
+          } else {
+            setProgressMsg('Reformulation en cours... ('+attempts*5+'s)');
+            setTimeout(poll, 5000);
+          }
+        } catch(e) {
+          if(attempts >= maxAttempts) {
+            setError('Erreur lors de la verification du statut.');
+            setLoading(false);
+          } else {
+            setTimeout(poll, 5000);
+          }
+        }
+      };
+      setTimeout(poll, 5000);
     } catch(e) {
-      setError(e.response?.data?.error || 'Erreur lors de la generation');
+      setError(e.response?.data?.error || 'Erreur lors du demarrage de la generation');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const telecharger = () => {
@@ -258,7 +297,7 @@ const CVOptimise = ({ offre }) => {
   return (
     <div style={{marginBottom:8}}>
       <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(168,85,247,0.18)',color:'#c084fc',border:'1px solid rgba(168,85,247,0.35)'}}>
-        {loading?'Generation du CV optimise (15-20s)...':'📄 Générer CV optimisé pour cette offre'}
+        {loading?(progressMsg||'Generation en cours...'):'📄 Générer CV optimisé pour cette offre'}
       </button>
       {error && (
         <div style={{...G.card,marginTop:8,background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',color:'#fca5a5',fontSize:12}}>

@@ -234,6 +234,59 @@ const SimulateurEntretien = ({ offre }) => {
   );
 };
 
+const CVOptimise = ({ offre }) => {
+  const [data, setData] = React.useState(null);
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState('');
+
+  const generer = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const r = await axios.post(API+'/jobs/'+offre.id+'/cv-optimise');
+      setData(r.data);
+    } catch(e) {
+      setError(e.response?.data?.error || 'Erreur lors de la generation');
+    }
+    setLoading(false);
+  };
+
+  const telecharger = () => {
+    window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/pdf', '_blank');
+  };
+
+  return (
+    <div style={{marginBottom:8}}>
+      <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'10px',fontSize:13,background:'rgba(168,85,247,0.18)',color:'#c084fc',border:'1px solid rgba(168,85,247,0.35)'}}>
+        {loading?'Generation du CV optimise (15-20s)...':'📄 Générer CV optimisé pour cette offre'}
+      </button>
+      {error && (
+        <div style={{...G.card,marginTop:8,background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.25)',color:'#fca5a5',fontSize:12}}>
+          {error}
+        </div>
+      )}
+      {data && (
+        <div style={{...G.card,marginTop:8,background:'rgba(168,85,247,0.05)',border:'1px solid rgba(168,85,247,0.2)'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#c084fc',marginBottom:8}}>📄 CV optimisé généré</div>
+          <div style={{fontSize:12,color:'#e2e8f0',marginBottom:6}}><strong>Titre adapté:</strong> {data.titre_accroche}</div>
+          <div style={{fontSize:11,color:'#94a3b8',marginBottom:10,lineHeight:1.6}}>{data.resume}</div>
+          {data.points_cles_mis_en_avant && (
+            <div style={{marginBottom:10}}>
+              <div style={{fontSize:11,color:'#c084fc',fontWeight:600,marginBottom:4}}>Points mis en avant pour cette offre:</div>
+              {data.points_cles_mis_en_avant.map((p,i)=>(
+                <div key={i} style={{fontSize:11,color:'#94a3b8',marginBottom:2}}>✨ {p}</div>
+              ))}
+            </div>
+          )}
+          <button onClick={telecharger} style={{...G.btn,width:'100%',padding:'10px',fontSize:12,background:'rgba(168,85,247,0.3)',color:'#c084fc'}}>
+            📥 Télécharger le CV optimisé (PDF)
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const MatchCV = ({ offre }) => {
   const [data, setData] = React.useState(null);
   const [loading, setLoading] = React.useState(false);
@@ -472,6 +525,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
         </div>
         <FicheEntreprise offre={detail}/>
         <ReponsesSTAR offre={detail}/>
+        <CVOptimise offre={detail}/>
         <MatchCV offre={detail}/>
         <ScoreDetail offre={detail}/>
         <PitchIA offre={detail}/>

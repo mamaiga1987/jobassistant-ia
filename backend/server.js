@@ -2151,3 +2151,128 @@ app.post('/api/metiers/relancer-collecte', async (req, res) => {
     child.unref();
   } catch(e) { res.status(500).json({error:e.message}); }
 });
+
+// ── CV OPTIMISÉ PAR OFFRE ──────────────────────────────────────────────────────
+app.post('/api/jobs/:id/cv-optimise', async (req, res) => {
+  try {
+    const profil = await getProfil();
+    const job = (await pool.query('SELECT * FROM ja_jobs WHERE id=$1',[req.params.id])).rows[0];
+    if(!job) return res.status(404).json({error:'Non trouvée'});
+
+    const fs = require('fs');
+    const { execSync } = require('child_process');
+    let cvText = '';
+    if(profil.cv_path && fs.existsSync(profil.cv_path)) {
+      try { cvText = execSync(`pdftotext "${profil.cv_path}" -`, {encoding:'utf8', timeout:15000}); }
+      catch(e) { console.log('pdftotext error:', e.message); }
+    }
+
+    if(cvText.length < 100) {
+      return res.status(400).json({error:'Aucun CV PDF uploadé. Uploadez votre CV dans Mon CV & Profil avant de générer une version optimisée.'});
+    }
+
+    const prompt = `Tu es un expert en rédaction de CV. Voici le CV REEL et COMPLET d'un candidat, et une offre d'emploi précise.
+
+CV ORIGINAL DU CANDIDAT (verite absolue, ne jamais inventer d'experience non presente ici):
+${cvText.slice(0,4000)}
+
+OFFRE VISEE:
+Titre: ${job.title}
+Entreprise: ${job.company||'Non precise'}
+Description complete: ${(job.description||'').slice(0,1500)}
+
+TACHE: Réécris ce CV pour maximiser les chances de matcher avec CETTE offre precise, en respectant ces règles strictes:
+1. N'invente JAMAIS une expérience, compétence ou certification absente du CV original
+2. Réorganise et reformule les expériences existantes pour mettre en avant ce qui est pertinent pour cette offre
+3. Adapte le titre/accroche pour refleter le vocabulaire exact de l'offre (sans mentir)
+4. Réordonne les compétences techniques: celles demandées dans l'offre en premier
+5. Reformule les descriptions de mission pour utiliser les mots-cles de l'offre quand c'est honnete de le faire
+6. Garde un format CV professionnel standard
+
+Retourne un JSON structuré:
+{
+  "nom": "...",
+  "titre_accroche": "titre adapte a cette offre",
+  "resume": "2-3 phrases d'accroche adaptees a cette offre, basees sur le CV reel",
+  "competences_ordonnees": ["liste reordonnee, pertinentes pour cette offre en premier"],
+  "experiences": [
+    {"titre":"...", "periode":"...", "entreprise":"...", "description":"reformulee pour cette offre, basee sur le CV reel"}
+  ],
+  "certifications": ["liste du CV original"],
+  "formation": "du CV original",
+  "points_cles_mis_en_avant": ["2-3 elements du CV reel particulierement pertinents pour cette offre"]
+}
+Retourne UNIQUEMENT le JSON, base a 100% sur le contenu reel du CV fourni.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:2000,messages:[{role:'user',content:prompt}]});
+    const result = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
+      r.on('error',()=>resolve(null));r.write(body);r.end();
+    });
+
+    const data = JSON.parse(result.replace(/```json|```/g,'').trim());
+
+    // Stocker temporairement pour generation PDF
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_cv_optimises (
+      id SERIAL PRIMARY KEY, job_id INTEGER, data JSONB, created_at TIMESTAMP DEFAULT NOW())`);
+    const saved = await pool.query('INSERT INTO ja_cv_optimises (job_id, data) VALUES ($1,$2) RETURNING id',
+      [req.params.id, JSON.stringify(data)]);
+
+    res.json({ ...data, cv_optimise_id: saved.rows[0].id });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── TÉLÉCHARGER CV OPTIMISÉ PDF ───────────────────────────────────────────────
+app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT data FROM ja_cv_optimises WHERE id=$1', [req.params.id]);
+    if(r.rows.length === 0) return res.status(404).json({error:'CV optimisé non trouvé'});
+    const d = r.rows[0].data;
+
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({margin:50, size:'A4'});
+    res.setHeader('Content-Type','application/pdf');
+    res.setHeader('Content-Disposition','attachment; filename=CV_Optimise_'+(d.nom||'candidat').replace(/\s/g,'_')+'.pdf');
+    doc.pipe(res);
+
+    doc.fontSize(22).fillColor('#1e3a5f').text(d.nom||'Candidat');
+    doc.fontSize(13).fillColor('#2d6a9f').text(d.titre_accroche||'');
+    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · mmohamedassalia6@gmail.com · Disponible immédiatement');
+    doc.moveDown(0.5);
+    doc.moveTo(50,doc.y).lineTo(545,doc.y).strokeColor('#2d6a9f').lineWidth(2).stroke();
+    doc.moveDown(0.5);
+
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('PROFIL');
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.resume||'');
+    doc.moveDown(0.5);
+
+    if((d.certifications||[]).length>0){
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('CERTIFICATIONS');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.certifications||[]).join(' · '));
+      doc.moveDown(0.5);
+    }
+
+    if((d.competences_ordonnees||[]).length>0){
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('COMPÉTENCES TECHNIQUES');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.competences_ordonnees||[]).join(', '));
+      doc.moveDown(0.5);
+    }
+
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('EXPÉRIENCES PROFESSIONNELLES');
+    (d.experiences||[]).forEach(e=>{
+      doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre+(e.entreprise?' — '+e.entreprise:''));
+      doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode||'');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(e.description||'');
+      doc.moveDown(0.3);
+    });
+
+    if(d.formation){
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('FORMATION');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.formation);
+    }
+
+    doc.end();
+  } catch(e) { res.status(500).json({error:e.message}); }
+});

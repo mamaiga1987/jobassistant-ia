@@ -1268,12 +1268,57 @@ const MetiersCiblesPage = () => {
 };
 
 const OffreLibrePage = () => {
-  const [titreOffre, setTitreOffre] = React.useState('');
-  const [texteOffre, setTexteOffre] = React.useState('');
+  const [titreOffre, setTitreOffre] = React.useState(() => localStorage.getItem('offre_libre_titre_draft') || '');
+  const [texteOffre, setTexteOffre] = React.useState(() => localStorage.getItem('offre_libre_texte_draft') || '');
   const [loading, setLoading] = React.useState(false);
   const [progressMsg, setProgressMsg] = React.useState('');
   const [error, setError] = React.useState('');
   const [data, setData] = React.useState(null);
+  const [showApercu, setShowApercu] = React.useState(false);
+  const [historique, setHistorique] = React.useState([]);
+  const [showHistorique, setShowHistorique] = React.useState(false);
+  const [lettre, setLettre] = React.useState('');
+  const [lettreLoading, setLettreLoading] = React.useState(false);
+  const [detectingTitre, setDetectingTitre] = React.useState(false);
+
+  // Sauvegarde brouillon automatique
+  React.useEffect(() => {
+    localStorage.setItem('offre_libre_titre_draft', titreOffre);
+  }, [titreOffre]);
+  React.useEffect(() => {
+    localStorage.setItem('offre_libre_texte_draft', texteOffre);
+  }, [texteOffre]);
+
+  const chargerHistorique = () => {
+    axios.get(API+'/cv-optimise/historique').then(r => {
+      setHistorique(r.data);
+      setShowHistorique(true);
+    }).catch(()=>{});
+  };
+
+  const detecterTitre = async () => {
+    if(texteOffre.trim().length < 30 || titreOffre.trim()) return;
+    setDetectingTitre(true);
+    try {
+      const r = await axios.post(API+'/cv-offre-libre/detecter-titre', { texte_offre: texteOffre }, {timeout: 15000});
+      if(r.data.titre) setTitreOffre(r.data.titre);
+    } catch(e) {}
+    setDetectingTitre(false);
+  };
+
+  const genererLettre = async () => {
+    if(!data) return;
+    setLettreLoading(true);
+    try {
+      const r = await axios.post(API+'/cv-optimise/'+data.cv_optimise_id+'/lettre', {
+        texte_offre: texteOffre, titre_offre: titreOffre
+      }, {timeout: 30000});
+      setLettre(r.data.lettre || '');
+    } catch(e) {
+      setLettre('Erreur lors de la generation de la lettre.');
+    }
+    setLettreLoading(false);
+  };
 
   const generer = async () => {
     if(texteOffre.trim().length < 30) {
@@ -1337,12 +1382,41 @@ const OffreLibrePage = () => {
   return (
     <div>
       <div style={{...G.card,marginBottom:12,background:'rgba(168,85,247,0.06)',border:'1px solid rgba(168,85,247,0.2)'}}>
-        <div style={{fontSize:13,fontWeight:700,color:'#c084fc',marginBottom:6}}>📋 Coller une offre trouvee ailleurs</div>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#c084fc'}}>📋 Coller une offre trouvee ailleurs</div>
+          <button onClick={chargerHistorique} style={{...G.btn,padding:'4px 10px',fontSize:10,background:'rgba(168,85,247,0.15)',color:'#c084fc'}}>🕒 Historique</button>
+        </div>
         <div style={{fontSize:11,color:'#94a3b8',lineHeight:1.6}}>Trouve une offre sur LinkedIn, Welcome to the Jungle, le site d'une entreprise, etc. ? Colle son contenu ici pour generer un CV optimise specifiquement pour cette offre, base sur votre CV reel.</div>
       </div>
 
-      <input value={titreOffre} onChange={e=>setTitreOffre(e.target.value)} placeholder="Titre du poste (ex: Data Product Manager - Fintech Paris)" style={{...G.inp,marginBottom:8,fontSize:13}}/>
-      <textarea value={texteOffre} onChange={e=>setTexteOffre(e.target.value)} placeholder="Collez ici le texte complet de l'offre (description, missions, profil recherche...)" style={{...G.inp,height:220,resize:'vertical',fontSize:12,marginBottom:12,fontFamily:'inherit'}}/>
+      {showHistorique && (
+        <div style={{...G.card,marginBottom:12}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+            <div style={{fontSize:12,fontWeight:700,color:'#e2e8f0'}}>CV optimises generes recemment</div>
+            <button onClick={()=>setShowHistorique(false)} style={{background:'transparent',border:'none',color:'#64748b',cursor:'pointer',fontSize:11}}>Fermer</button>
+          </div>
+          {historique.length===0 && <div style={{fontSize:11,color:'#64748b'}}>Aucun CV genere pour le moment.</div>}
+          {historique.map(h=>(
+            <div key={h.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:'1px solid rgba(139,92,246,0.08)'}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:11,color:'#e2e8f0'}}>{h.titre_affiche||'Offre sans titre'}{h.company?' — '+h.company:''}</div>
+                <div style={{fontSize:9,color:'#64748b'}}>{new Date(h.created_at).toLocaleDateString('fr-FR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</div>
+              </div>
+              <div style={{display:'flex',gap:4}}>
+                <button onClick={()=>window.open(API+'/cv-optimise/'+h.id+'/pdf','_blank')} style={{...G.btn,padding:'3px 8px',fontSize:10}}>PDF</button>
+                <button onClick={()=>window.open(API+'/cv-optimise/'+h.id+'/docx','_blank')} style={{...G.btn,padding:'3px 8px',fontSize:10,background:'rgba(59,130,246,0.2)',color:'#60a5fa'}}>Word</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{display:'flex',gap:6,marginBottom:8}}>
+        <input value={titreOffre} onChange={e=>setTitreOffre(e.target.value)} placeholder="Titre du poste (ex: Data Product Manager - Fintech Paris)" style={{...G.inp,fontSize:13,flex:1}}/>
+        {detectingTitre && <div style={{fontSize:10,color:'#c084fc',alignSelf:'center',whiteSpace:'nowrap'}}>Detection...</div>}
+      </div>
+      <textarea value={texteOffre} onChange={e=>setTexteOffre(e.target.value)} onBlur={detecterTitre} placeholder="Collez ici le texte complet de l'offre (description, missions, profil recherche...)" style={{...G.inp,height:220,resize:'vertical',fontSize:12,marginBottom:4,fontFamily:'inherit'}}/>
+      <div style={{fontSize:10,color:'#64748b',marginBottom:8}}>Le titre se detecte automatiquement si vous le laissez vide. Le brouillon est sauvegarde automatiquement.</div>
 
       <button onClick={generer} disabled={loading} style={{...G.btn,width:'100%',padding:'12px',fontSize:13,background:'rgba(168,85,247,0.18)',color:'#c084fc',border:'1px solid rgba(168,85,247,0.35)',marginBottom:12}}>
         {loading?(progressMsg||'Generation en cours...'):'📄 Générer mon CV optimisé pour cette offre'}
@@ -1367,7 +1441,7 @@ const OffreLibrePage = () => {
               ))}
             </div>
           )}
-          <div style={{display:'flex',gap:8}}>
+          <div style={{display:'flex',gap:8,marginBottom:8}}>
             <button onClick={telechargerPDF} style={{...G.btn,flex:1,padding:'10px',fontSize:12,background:'rgba(168,85,247,0.3)',color:'#c084fc'}}>
               📥 PDF
             </button>
@@ -1375,6 +1449,42 @@ const OffreLibrePage = () => {
               📥 Word
             </button>
           </div>
+
+          <button onClick={()=>setShowApercu(!showApercu)} style={{...G.btn,width:'100%',padding:'8px',fontSize:11,background:'transparent',color:'#94a3b8',border:'1px solid #334155',marginBottom:8}}>
+            {showApercu?'Masquer':'👁 Voir'} le detail des experiences reformulees
+          </button>
+
+          {showApercu && (
+            <div style={{marginBottom:10}}>
+              {(data.competences_ordonnees||[]).length>0 && (
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#c084fc',marginBottom:4}}>Competences (ordre adapte a l'offre):</div>
+                  <div style={{fontSize:10,color:'#94a3b8',lineHeight:1.6}}>{(data.competences_ordonnees||[]).join(', ')}</div>
+                </div>
+              )}
+              {(data.experiences||[]).map((e,i)=>(
+                <div key={i} style={{marginBottom:10,padding:8,background:'rgba(15,23,42,0.4)',borderRadius:6}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#e2e8f0'}}>{e.titre}{e.entreprise?' — '+e.entreprise:''}</div>
+                  <div style={{fontSize:9,color:'#64748b',marginBottom:4}}>{e.periode}</div>
+                  <div style={{fontSize:10,color:'#94a3b8',whiteSpace:'pre-wrap',lineHeight:1.6}}>{e.description}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={genererLettre} disabled={lettreLoading} style={{...G.btn,width:'100%',padding:'10px',fontSize:12,background:'rgba(34,197,94,0.18)',color:'#4ade80',border:'1px solid rgba(34,197,94,0.3)'}}>
+            {lettreLoading?'Generation de la lettre...':'✉️ Generer la lettre de motivation assortie'}
+          </button>
+
+          {lettre && (
+            <div style={{...G.card,marginTop:10,background:'rgba(34,197,94,0.05)',border:'1px solid rgba(34,197,94,0.2)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:'#4ade80'}}>✉️ Lettre de motivation</div>
+                <button onClick={()=>navigator.clipboard.writeText(lettre)} style={{...G.btn,padding:'4px 10px',fontSize:10,background:'rgba(34,197,94,0.2)',color:'#4ade80'}}>Copier</button>
+              </div>
+              <div style={{fontSize:11,color:'#e2e8f0',whiteSpace:'pre-wrap',lineHeight:1.7}}>{lettre}</div>
+            </div>
+          )}
         </div>
       )}
     </div>

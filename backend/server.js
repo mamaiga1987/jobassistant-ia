@@ -2318,7 +2318,7 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
     (d.experiences||[]).forEach(e=>{
       doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre+(e.entreprise?' — '+e.entreprise:''));
       doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode||'');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/!'/g,'->'));
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/!'/g,'->').replace(/\uFFFD+/g,''));
       doc.moveDown(0.3);
     });
 
@@ -2497,7 +2497,7 @@ app.get('/api/cv-optimise/:id/docx', async (req, res) => {
         children: [new TextRun({ text: e.periode || '', italics: true, size: 18, color: '64748b' })],
         spacing: { after: 60 }
       }));
-      (e.description || '').split('\n').forEach(line => {
+      (e.description || '').replace(/\uFFFD+/g,'').split('\n').forEach(line => {
         if(line.trim()) {
           children.push(new Paragraph({ children: [new TextRun({ text: line.trim().replace(/^[-●]\s*/, '• '), size: 19 })], spacing: { after: 40 } }));
         }
@@ -2515,5 +2515,100 @@ app.get('/api/cv-optimise/:id/docx', async (req, res) => {
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
     res.setHeader('Content-Disposition', 'attachment; filename=CV_Optimise_' + (d.nom||'candidat').replace(/\s/g,'_') + '.docx');
     res.send(buffer);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── HISTORIQUE DES CV OPTIMISÉS GÉNÉRÉS ───────────────────────────────────────
+app.get('/api/cv-optimise/historique', async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_cv_optimises (
+      id SERIAL PRIMARY KEY, job_id INTEGER, data JSONB, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await pool.query(`ALTER TABLE ja_cv_optimises ADD COLUMN IF NOT EXISTS offre_titre TEXT`);
+    const r = await pool.query(`
+      SELECT c.id, c.status, c.created_at, c.offre_titre, c.job_id,
+        COALESCE(c.offre_titre, j.title) as titre_affiche,
+        j.company
+      FROM ja_cv_optimises c
+      LEFT JOIN ja_jobs j ON j.id = c.job_id
+      WHERE c.status = 'done'
+      ORDER BY c.created_at DESC LIMIT 30`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── HISTORIQUE DES CV OPTIMISÉS GÉNÉRÉS ───────────────────────────────────────
+app.get('/api/cv-optimise/historique', async (req, res) => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS ja_cv_optimises (
+      id SERIAL PRIMARY KEY, job_id INTEGER, data JSONB, status VARCHAR(20) DEFAULT 'pending', created_at TIMESTAMP DEFAULT NOW())`);
+    await pool.query(`ALTER TABLE ja_cv_optimises ADD COLUMN IF NOT EXISTS offre_titre TEXT`);
+    const r = await pool.query(`
+      SELECT c.id, c.status, c.created_at, c.offre_titre, c.job_id,
+        COALESCE(c.offre_titre, j.title) as titre_affiche,
+        j.company
+      FROM ja_cv_optimises c
+      LEFT JOIN ja_jobs j ON j.id = c.job_id
+      WHERE c.status = 'done'
+      ORDER BY c.created_at DESC LIMIT 30`);
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DÉTECTION AUTO DU TITRE D'UNE OFFRE COLLÉE ────────────────────────────────
+app.post('/api/cv-offre-libre/detecter-titre', async (req, res) => {
+  try {
+    const { texte_offre } = req.body;
+    if(!texte_offre || texte_offre.length < 30) return res.json({ titre: '' });
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:100,messages:[{role:'user',content:
+      `Extrait uniquement le titre du poste et l'entreprise (si visible) de cette offre d'emploi, format court "Titre - Entreprise" ou juste "Titre" si l'entreprise n'est pas claire. Reponds UNIQUEMENT avec ce titre, sans phrase autour.\n\n${texte_offre.slice(0,1500)}`
+    }]});
+    const result = await new Promise((resolve) => {
+      const https = require('https');
+      const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text.trim())}catch(e){resolve('')}})});
+      r.on('error',()=>resolve(''));r.write(body);r.end();
+    });
+    res.json({ titre: result });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── LETTRE DE MOTIVATION POUR OFFRE LIBRE (associée au CV optimisé) ──────────
+app.post('/api/cv-optimise/:id/lettre', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT data FROM ja_cv_optimises WHERE id=$1', [req.params.id]);
+    if(r.rows.length === 0) return res.status(404).json({error:'CV optimisé non trouvé'});
+    const d = r.rows[0].data;
+
+    const { texte_offre, titre_offre } = req.body;
+
+    const prompt = `Tu es un expert en redaction de lettres de motivation. Voici un CV deja adapte pour une offre precise, et le texte de cette offre. Redige une lettre de motivation professionnelle, concise (250-350 mots), en francais, personnalisee et non generique, qui:
+1. S'appuie sur les points cles reels du candidat (pas d'invention)
+2. Fait explicitement le lien avec les exigences de l'offre
+3. A un ton professionnel mais avec une vraie personnalite, pas une lettre type
+4. Se termine par une formule de politesse adaptee
+
+CANDIDAT (profil et experiences reelles, deja adaptees pour cette offre):
+Nom: ${d.nom}
+Titre: ${d.titre_accroche}
+Resume: ${d.resume}
+Points cles: ${(d.points_cles_mis_en_avant||[]).join('. ')}
+Experiences principales: ${(d.experiences||[]).slice(0,2).map(e => e.titre + ' chez ' + e.entreprise).join(' | ')}
+
+OFFRE VISEE:
+Titre: ${titre_offre || ''}
+Texte: ${(texte_offre||'').slice(0,2000)}
+
+Retourne UNIQUEMENT le texte de la lettre, sans en-tete ni metadonnees, pret a etre copie.`;
+
+    const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]});
+    const lettre = await new Promise((resolve) => {
+      const https = require('https');
+      const r2 = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r2=>{let dd='';r2.on('data',c=>dd+=c);r2.on('end',()=>{try{resolve(JSON.parse(dd).content[0].text)}catch(e){resolve('Erreur de generation')}})});
+      r2.on('error',()=>resolve('Erreur de generation'));r2.write(body);r2.end();
+    });
+
+    res.json({ lettre });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });

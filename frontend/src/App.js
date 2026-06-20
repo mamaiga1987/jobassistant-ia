@@ -241,6 +241,9 @@ const CVOptimise = ({ offre }) => {
   const [error, setError] = React.useState('');
 
   const [progressMsg, setProgressMsg] = React.useState('');
+  const [showApercu, setShowApercu] = React.useState(false);
+  const [lettre, setLettre] = React.useState('');
+  const [lettreLoading, setLettreLoading] = React.useState(false);
 
   const generer = async () => {
     setLoading(true);
@@ -291,8 +294,20 @@ const CVOptimise = ({ offre }) => {
     }
   };
 
-  const telecharger = () => {
-    window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/pdf', '_blank');
+  const telechargerPDF = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/pdf', '_blank');
+  const telechargerDOCX = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/docx', '_blank');
+  const genererLettre = async () => {
+    if(!data) return;
+    setLettreLoading(true);
+    try {
+      const r = await axios.post(API+'/cv-optimise/'+data.cv_optimise_id+'/lettre', {
+        texte_offre: offre.description || '', titre_offre: offre.title || ''
+      }, {timeout: 30000});
+      setLettre(r.data.lettre || '');
+    } catch(e) {
+      setLettre('Erreur lors de la generation de la lettre.');
+    }
+    setLettreLoading(false);
   };
 
   return (
@@ -318,15 +333,55 @@ const CVOptimise = ({ offre }) => {
               ))}
             </div>
           )}
-          <button onClick={telecharger} style={{...G.btn,width:'100%',padding:'10px',fontSize:12,background:'rgba(168,85,247,0.3)',color:'#c084fc'}}>
-            📥 Télécharger le CV optimisé (PDF)
+          <div style={{display:'flex',gap:8,marginBottom:8}}>
+            <button onClick={telechargerPDF} style={{...G.btn,flex:1,padding:'10px',fontSize:12,background:'rgba(168,85,247,0.3)',color:'#c084fc'}}>
+              📥 PDF
+            </button>
+            <button onClick={telechargerDOCX} style={{...G.btn,flex:1,padding:'10px',fontSize:12,background:'rgba(59,130,246,0.3)',color:'#60a5fa'}}>
+              📥 Word
+            </button>
+          </div>
+
+          <button onClick={()=>setShowApercu(!showApercu)} style={{...G.btn,width:'100%',padding:'8px',fontSize:11,background:'transparent',color:'#94a3b8',border:'1px solid #334155',marginBottom:8}}>
+            {showApercu?'Masquer':'👁 Voir'} le detail des experiences reformulees
           </button>
+
+          {showApercu && (
+            <div style={{marginBottom:10}}>
+              {(data.competences_ordonnees||[]).length>0 && (
+                <div style={{marginBottom:10}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#c084fc',marginBottom:4}}>Competences (ordre adapte a l'offre):</div>
+                  <div style={{fontSize:10,color:'#94a3b8',lineHeight:1.6}}>{(data.competences_ordonnees||[]).join(', ')}</div>
+                </div>
+              )}
+              {(data.experiences||[]).map((e,i)=>(
+                <div key={i} style={{marginBottom:10,padding:8,background:'rgba(15,23,42,0.4)',borderRadius:6}}>
+                  <div style={{fontSize:11,fontWeight:700,color:'#e2e8f0'}}>{e.titre}{e.entreprise?' — '+e.entreprise:''}</div>
+                  <div style={{fontSize:9,color:'#64748b',marginBottom:4}}>{e.periode}</div>
+                  <div style={{fontSize:10,color:'#94a3b8',whiteSpace:'pre-wrap',lineHeight:1.6}}>{e.description}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <button onClick={genererLettre} disabled={lettreLoading} style={{...G.btn,width:'100%',padding:'10px',fontSize:12,background:'rgba(34,197,94,0.18)',color:'#4ade80',border:'1px solid rgba(34,197,94,0.3)'}}>
+            {lettreLoading?'Generation de la lettre...':'✉️ Generer la lettre de motivation assortie'}
+          </button>
+
+          {lettre && (
+            <div style={{...G.card,marginTop:10,background:'rgba(34,197,94,0.05)',border:'1px solid rgba(34,197,94,0.2)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+                <div style={{fontSize:12,fontWeight:700,color:'#4ade80'}}>✉️ Lettre de motivation</div>
+                <button onClick={()=>navigator.clipboard.writeText(lettre)} style={{...G.btn,padding:'4px 10px',fontSize:10,background:'rgba(34,197,94,0.2)',color:'#4ade80'}}>Copier</button>
+              </div>
+              <div style={{fontSize:11,color:'#e2e8f0',whiteSpace:'pre-wrap',lineHeight:1.7}}>{lettre}</div>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 };
-
 const MatchCV = ({ offre }) => {
   const [data, setData] = React.useState(null);
   const [loading, setLoading] = React.useState(false);

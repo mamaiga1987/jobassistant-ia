@@ -375,7 +375,48 @@ app.post('/api/recalcul-scores', async (req, res) => {
       await pool.query('UPDATE ja_jobs SET ia_score=$1 WHERE id=$2', [score, job.id]);
       updated++;
     }
-    res.json({ updated, message: `${updated} scores recalculés` });
+
+    // Reappliquer immediatement la ponderation semantique si le profil est vectorise
+    // pour eviter que ia_score reste un score brut non pondere
+    try {
+      const profilEmb = await pool.query('SELECT embedding FROM ja_profil_embedding LIMIT 1');
+      if(profilEmb.rows.length > 0) {
+        let profilVector = profilEmb.rows[0].embedding;
+        if(typeof profilVector === 'string') profilVector = JSON.parse(profilVector);
+
+        const jobsEmb = await pool.query('SELECT id, ia_score, embedding, published_at FROM ja_jobs WHERE embedding IS NOT NULL');
+        for(const job of jobsEmb.rows) {
+          try {
+            let jobVector = job.embedding;
+            if(typeof jobVector === 'string') jobVector = JSON.parse(jobVector);
+            if(!Array.isArray(jobVector) || jobVector.length === 0) continue;
+
+            const similarity = cosineSimilarity(profilVector, jobVector);
+            const semanticScore = Math.round(Math.max(0, similarity) * 100);
+            const full = '';
+            const MIN_SIM = 21, MAX_SIM = 72;
+            const normalizedSemantic = Math.round(Math.max(0, Math.min(100, (semanticScore - MIN_SIM) / (MAX_SIM - MIN_SIM) * 100)));
+
+            const jobRow = await pool.query('SELECT title, description, tags, published_at FROM ja_jobs WHERE id=$1', [job.id]);
+            const j = jobRow.rows[0];
+            const fullText = (j.title+' '+(j.description||'')+' '+(j.tags||[]).join(' ')).toLowerCase();
+            let bonus = 0;
+            if(fullText.includes('paris')||fullText.includes('ile-de-france')||fullText.includes('91 -')||fullText.includes('92 -')||fullText.includes('93 -')) bonus += 10;
+            if(fullText.match(/4[89][0-9]{3}|5[0-9]{4}|6[0-5][0-9]{3}/)) bonus += 5;
+            if(fullText.includes('senior')||fullText.includes('confirmé')||fullText.includes('lead')) bonus += 5;
+
+            const pubDate = j.published_at ? new Date(j.published_at) : new Date();
+            const daysOld = Math.floor((Date.now() - pubDate) / 86400000);
+            const freshnessBonus = daysOld <= 1 ? 8 : daysOld <= 3 ? 5 : daysOld <= 7 ? 3 : daysOld <= 14 ? 1 : 0;
+
+            const combined = Math.min(Math.round(normalizedSemantic * 0.8 + bonus + freshnessBonus), 99);
+            await pool.query('UPDATE ja_jobs SET semantic_score=$1, ia_score=$2 WHERE id=$3', [semanticScore, Math.max(combined, 1), job.id]);
+          } catch(e) { continue; }
+        }
+      }
+    } catch(e) { console.log('Reponderation semantique skippee:', e.message); }
+
+    res.json({ updated, message: `${updated} scores recalculés (et reponderes semantiquement si profil vectorise)` });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -2612,3 +2612,191 @@ Retourne UNIQUEMENT le texte de la lettre, sans en-tete ni metadonnees, pret a e
     res.json({ lettre });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── PRÉPARATION AUTOMATIQUE DES CANDIDATURES TOP-SCORE ───────────────────────
+app.post('/api/candidatures/preparation-auto', async (req, res) => {
+  try {
+    res.json({ status: 'pending', message: 'Préparation automatique démarrée en arrière-plan' });
+
+    (async () => {
+      try {
+        const profil = await getProfil();
+        const fs = require('fs');
+        const { execSync } = require('child_process');
+        let cvText = '';
+        if(profil.cv_path && fs.existsSync(profil.cv_path)) {
+          try { cvText = execSync(`pdftotext "${profil.cv_path}" -`, {encoding:'utf8', timeout:15000}); }
+          catch(e) { console.log('pdftotext error:', e.message); }
+        }
+        if(cvText.length < 100) {
+          console.log('Préparation auto annulée: aucun CV PDF uploadé');
+          return;
+        }
+
+        // Sélectionner les offres récentes (48h) à score sémantique élevé, non déjà traitées aujourd'hui
+        await pool.query(`CREATE TABLE IF NOT EXISTS ja_candidatures_auto (
+          id SERIAL PRIMARY KEY, job_id INTEGER UNIQUE, verdict VARCHAR(50),
+          score_match INTEGER, cv_optimise_id INTEGER, lettre TEXT,
+          analyse_match JSONB, created_at TIMESTAMP DEFAULT NOW())`);
+
+        const OBJECTIF_QUOTIDIEN = 5;
+        const MAX_OFFRES_ANALYSEES = 20; // limite de securite pour eviter une boucle trop longue
+
+        const candidates = await pool.query(`
+          SELECT j.* FROM ja_jobs j
+          LEFT JOIN ja_candidatures_auto ca ON ca.job_id = j.id
+          WHERE j.ia_score >= 70
+            AND j.published_at >= NOW() - INTERVAL '5 days'
+            AND ca.id IS NULL
+          ORDER BY j.ia_score DESC
+          LIMIT ${MAX_OFFRES_ANALYSEES}`);
+
+        console.log(`Préparation auto: ${candidates.rows.length} offres candidates à analyser (objectif: ${OBJECTIF_QUOTIDIEN} retenues)`);
+
+        const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+        async function callClaude(prompt, maxTokens) {
+          const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens,messages:[{role:'user',content:prompt}]});
+          return new Promise((resolve) => {
+            const https = require('https');
+            const r = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':ANTHROPIC_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text)}catch(e){resolve(null)}})});
+            r.on('error',()=>resolve(null));r.write(body);r.end();
+          });
+        }
+
+        const retenues = [];
+
+        for(const job of candidates.rows) {
+          if(retenues.length >= OBJECTIF_QUOTIDIEN) {
+            console.log(`Objectif de ${OBJECTIF_QUOTIDIEN} candidatures atteint, arret de l'analyse.`);
+            break;
+          }
+          try {
+            // 1. Analyse Match CV/Offre (qualitative, comme le module existant)
+            const matchPrompt = `Analyse le match entre ce candidat et cette offre, en te basant sur son CV REEL complet:
+CV DU CANDIDAT:
+${cvText.slice(0,6000)}
+
+OFFRE: ${job.title} chez ${job.company||'?'}
+Description: ${(job.description||'').slice(0,1200)}
+Tags: ${(job.tags||[]).join(', ')}
+
+Donne en JSON:
+{
+  "score_match": nombre 0-100,
+  "points_forts": ["3 points forts reels du candidat pour ce poste"],
+  "points_faibles": ["2-3 ecarts a combler"],
+  "conseil": "conseil en 1 phrase",
+  "verdict": "POSTULER MAINTENANT / POSTULER / A SURVEILLER / PASSER"
+}
+Retourne UNIQUEMENT le JSON.`;
+
+            const matchResult = await callClaude(matchPrompt, 600);
+            const matchData = JSON.parse((matchResult||'{}').replace(/```json|```/g,'').trim());
+
+            if(matchData.verdict !== 'POSTULER MAINTENANT' && matchData.verdict !== 'POSTULER') {
+              // Marquer comme traitée pour ne pas la re-analyser demain, mais ne rien generer
+              await pool.query('INSERT INTO ja_candidatures_auto (job_id, verdict, score_match, analyse_match) VALUES ($1,$2,$3,$4) ON CONFLICT (job_id) DO NOTHING',
+                [job.id, matchData.verdict||'INCONNU', matchData.score_match||0, JSON.stringify(matchData)]);
+              continue;
+            }
+
+            // 2. Génération CV optimisé (pipeline en 2 passes, identique au module manuel)
+            const extractPrompt = `Liste de maniere EXHAUSTIVE toutes les experiences professionnelles de ce CV (emplois, stages, projets), sans en oublier aucune.
+CV:
+${cvText.slice(0,12000)}
+Retourne UNIQUEMENT: {"experiences_brutes": [{"titre":"...", "entreprise":"...", "periode":"...", "description_brute":"..."}]}`;
+            const extractResult = await callClaude(extractPrompt, 3000);
+            const experiencesBrutes = (JSON.parse((extractResult||'{}').replace(/```json|```/g,'').trim())).experiences_brutes || [];
+
+            const cvPrompt = `Reecris ce CV pour l'offre "${job.title}" chez ${job.company||'?'} (description: ${(job.description||'').slice(0,1000)}).
+LISTE FIGEE DES EXPERIENCES (${experiencesBrutes.length} au total, toutes a reprendre sans exception):
+${JSON.stringify(experiencesBrutes)}
+CV complet pour contexte: ${cvText.slice(0,8000)}
+Retourne JSON: {"nom":"...","titre_accroche":"...","resume":"...","competences_ordonnees":[...],"experiences":[{"titre":"...","periode":"...","entreprise":"...","description":"..."}],"certifications":[...],"formation":"...","points_cles_mis_en_avant":[...]}
+Le tableau experiences doit avoir EXACTEMENT ${experiencesBrutes.length} elements. Retourne UNIQUEMENT le JSON.`;
+            const cvResult = await callClaude(cvPrompt, 4000);
+            const cvData = JSON.parse((cvResult||'{}').replace(/```json|```/g,'').trim());
+
+            if((cvData.experiences||[]).length < experiencesBrutes.length) {
+              const titresPresents = (cvData.experiences||[]).map(e => (e.titre||'').toLowerCase());
+              experiencesBrutes.forEach(eb => {
+                if(!titresPresents.some(t => t.includes((eb.entreprise||'').toLowerCase().slice(0,8)))) {
+                  cvData.experiences = cvData.experiences || [];
+                  cvData.experiences.push({ titre: eb.titre, periode: eb.periode, entreprise: eb.entreprise, description: eb.description_brute });
+                }
+              });
+            }
+
+            const savedCv = await pool.query('INSERT INTO ja_cv_optimises (job_id, data, status, offre_titre) VALUES ($1,$2,$3,$4) RETURNING id',
+              [job.id, JSON.stringify(cvData), 'done', job.title]);
+            const cvOptimiseId = savedCv.rows[0].id;
+
+            // 3. Lettre de motivation
+            const lettrePrompt = `Redige une lettre de motivation professionnelle (250-350 mots, francais), basee sur ce CV adapte et cette offre. Pas de generique, personnalisee.
+Candidat: ${cvData.nom}, ${cvData.titre_accroche}. Resume: ${cvData.resume}. Points cles: ${(cvData.points_cles_mis_en_avant||[]).join('. ')}
+Offre: ${job.title} chez ${job.company||'?'}. Texte: ${(job.description||'').slice(0,1500)}
+Retourne UNIQUEMENT le texte de la lettre.`;
+            const lettre = await callClaude(lettrePrompt, 1000);
+
+            await pool.query('INSERT INTO ja_candidatures_auto (job_id, verdict, score_match, cv_optimise_id, lettre, analyse_match) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (job_id) DO UPDATE SET verdict=$2, score_match=$3, cv_optimise_id=$4, lettre=$5, analyse_match=$6',
+              [job.id, matchData.verdict, matchData.score_match, cvOptimiseId, lettre, JSON.stringify(matchData)]);
+
+            retenues.push({ job, matchData, cvOptimiseId, lettre });
+            console.log(`✅ Préparé: ${job.title} (${matchData.verdict})`);
+          } catch(e) {
+            console.log(`Erreur préparation offre ${job.id}:`, e.message);
+          }
+        }
+
+        // 4. Email récapitulatif
+        if(retenues.length > 0) {
+          const nodemailer = require('nodemailer');
+          const transporter = nodemailer.createTransport({service:'gmail',auth:{user:'mmohamedassalia6@gmail.com',pass:process.env.GMAIL_PASS||''}});
+
+          const offresHtml = retenues.map(r => `
+            <div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px;background:#f8fafc">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <h3 style="margin:0;color:#1e3a5f">${r.job.title}</h3>
+                <span style="background:${r.matchData.verdict==='POSTULER MAINTENANT'?'#dcfce7':'#fef3c7'};color:${r.matchData.verdict==='POSTULER MAINTENANT'?'#166534':'#92400e'};padding:4px 10px;border-radius:6px;font-size:12px;font-weight:600">${r.matchData.verdict}</span>
+              </div>
+              <p style="color:#64748b;margin:4px 0">${r.job.company||'Entreprise non précisée'} · ${r.job.location||''} · Match: ${r.matchData.score_match}%</p>
+              <p style="font-size:13px;color:#334155"><strong>Points forts:</strong> ${(r.matchData.points_forts||[]).join(' · ')}</p>
+              <p style="font-size:13px;color:#92400e"><strong>À surveiller:</strong> ${(r.matchData.points_faibles||[]).join(' · ')}</p>
+              <p style="font-size:13px;font-style:italic;color:#475569">${r.matchData.conseil||''}</p>
+              <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+                <a href="https://jobassistant.monairbyte.eu/api/cv-optimise/${r.cvOptimiseId}/pdf" style="background:#8b5cf6;color:white;padding:8px 14px;border-radius:6px;text-decoration:none;font-size:13px">📥 CV PDF</a>
+                <a href="https://jobassistant.monairbyte.eu/api/cv-optimise/${r.cvOptimiseId}/docx" style="background:#3b82f6;color:white;padding:8px 14px;border-radius:6px;text-decoration:none;font-size:13px">📥 CV Word</a>
+                ${r.job.url ? `<a href="${r.job.url}" style="background:#10b981;color:white;padding:8px 14px;border-radius:6px;text-decoration:none;font-size:13px">🚀 Postuler maintenant</a>` : ''}
+              </div>
+              <details style="margin-top:10px">
+                <summary style="cursor:pointer;color:#8b5cf6;font-size:12px">✉️ Voir la lettre de motivation générée</summary>
+                <p style="white-space:pre-wrap;font-size:12px;color:#334155;margin-top:8px">${(r.lettre||'').replace(/</g,'&lt;')}</p>
+              </details>
+            </div>`).join('');
+
+          const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:20px;background:#f0f4f8">
+<div style="max-width:650px;margin:0 auto;background:white;border-radius:12px;overflow:hidden">
+<div style="background:linear-gradient(135deg,#1e3a5f,#8b5cf6);padding:24px;color:white;text-align:center">
+<h2 style="margin:0">🎯 ${retenues.length} candidature(s) prête(s) à valider</h2>
+<p style="margin:8px 0 0;opacity:0.9;font-size:13px">Analysées et préparées automatiquement — CV et lettre générés, à vous de valider et postuler</p>
+</div>
+<div style="padding:20px">${offresHtml}</div>
+<div style="background:#1e3a5f;color:rgba(255,255,255,0.7);padding:12px;text-align:center;font-size:12px">JobAssistant IA — jobassistant.monairbyte.eu</div>
+</div></body></html>`;
+
+          await transporter.sendMail({
+            from:'JobAssistant IA <mmohamedassalia6@gmail.com>',
+            to:'mmohamedassalia6@gmail.com',
+            subject:`🎯 ${retenues.length} candidature(s) prête(s) — CV et lettre générés`,
+            html
+          });
+          console.log(`✅ Email envoyé avec ${retenues.length} candidatures préparées`);
+        } else {
+          console.log('Aucune offre retenue aujourd\'hui (verdict POSTULER MAINTENANT/POSTULER)');
+        }
+      } catch(e) {
+        console.log('Erreur préparation auto globale:', e.message);
+      }
+    })();
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});

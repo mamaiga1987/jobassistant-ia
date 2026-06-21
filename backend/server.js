@@ -9,7 +9,7 @@ app.use(cors());
 app.use(express.json());
 
 const pool = new Pool({
-  host: '172.20.0.7', port: 5432,
+  host: '172.20.0.6', port: 5432,
   database: 'jobassistant', user: 'jobassistant', password: 'jobassistant2026'
 });
 

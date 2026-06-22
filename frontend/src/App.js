@@ -782,7 +782,7 @@ const CandidaturesPage = () => {
         return (
           <div key={c.id} style={{...G.card,marginBottom:10,borderLeft:'3px solid '+s.color}}>
             <div style={{display:'flex',gap:10,alignItems:'flex-start'}}>
-              <div style={{width:40,height:40,borderRadius:10,background:'#1e293b',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(c.company||'?')[0].toUpperCase()}</div>
+              <div className='job-avatar' style={{width:40,height:40,borderRadius:10,background:'#1e293b',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(c.company||'?')[0].toUpperCase()}</div>
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontSize:13,fontWeight:700,color:'#fff',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.title}</div>
                 <div style={{fontSize:11,color:'#94a3b8',marginBottom:4}}>{c.company} · {joursDepuis(c.date_postulation)} · <span style={{color:'#64748b'}}>{c.source_candidature||'JobAssistant'}</span></div>

@@ -86,3 +86,15 @@ body.light-mode {
   --bg: #f8fafc;
   --text: #1e293b;
 }
+
+/* Header blanc en mode clair */
+body.light-mode .header-bar {
+  background: #ffffff !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+body.light-mode .header-bar * {
+  color: #1e293b !important;
+}
+body.light-mode .text-main {
+  color: #1e293b !important;
+}

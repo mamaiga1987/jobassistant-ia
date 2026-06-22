@@ -606,7 +606,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
       <button onClick={()=>setDetail(null)} style={{background:'transparent',border:'none',color:'#8b5cf6',cursor:'pointer',fontSize:13,marginBottom:16}}>← Retour</button>
       <div style={{...G.card,marginBottom:12}}>
         <div style={{display:'flex',gap:12,alignItems:'flex-start',marginBottom:16}}>
-          <div style={{width:52,height:52,borderRadius:13,background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'1px solid rgba(139,92,246,0.3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(detail.company||'?')[0].toUpperCase()}</div>
+          <div className='job-avatar' style={{width:52,height:52,borderRadius:13,background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'1px solid rgba(139,92,246,0.3)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:22,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(detail.company||'?')[0].toUpperCase()}</div>
           <div style={{flex:1}}>
             <h2 style={{margin:'0 0 4px',fontSize:16,fontWeight:800,color:'#fff'}}>{detail.title}</h2>
             <div style={{fontSize:13,color:'#94a3b8'}}>{detail.company} · {detail.location}</div>
@@ -675,7 +675,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
       {filtered.map(job=>(
         <div key={job.id} style={{...G.card,marginBottom:12,cursor:'pointer'}} onClick={()=>setDetail(job)}>
           <div style={{display:'flex',gap:10,alignItems:'flex-start',marginBottom:10}}>
-            <div style={{width:44,height:44,borderRadius:11,background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'1px solid rgba(139,92,246,0.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(job.company||'?')[0].toUpperCase()}</div>
+            <div className='job-avatar' style={{width:44,height:44,borderRadius:11,background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'1px solid rgba(139,92,246,0.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(job.company||'?')[0].toUpperCase()}</div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{fontSize:14,fontWeight:700,color:'#fff',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{job.title}</div>
               <div style={{fontSize:12,color:'#64748b'}}>{job.company} · {job.location} · {job.contract_type||'CDI'}</div>

@@ -98,3 +98,32 @@ body.light-mode .header-bar * {
 body.light-mode .text-main {
   color: #1e293b !important;
 }
+
+/* Cartes offres - avatar lettre */
+body.light-mode [style*="linear-gradient(135deg,#1e293b"] {
+  background: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Titre offre */
+body.light-mode [style*="fontWeight:700"][style*="color:'#fff'"],
+body.light-mode [style*="fontWeight:800"][style*="color:'#fff'"] {
+  color: #1e293b !important;
+}
+
+/* Boutons transparents favoris/comparer */
+body.light-mode button[style*="background:'transparent'"][style*="color:'#334155'"] {
+  color: #475569 !important;
+}
+
+/* Avatar lettre entreprise - fond blanc en mode clair */
+body.light-mode [style*="linear-gradient(135deg,#1e293b,#0f172a)"] {
+  background: #ede9fe !important;
+  border-color: rgba(124,58,237,0.2) !important;
+}
+
+/* Avatar lettre entreprise */
+body.light-mode .job-avatar {
+  background: #ede9fe !important;
+  border-color: rgba(124,58,237,0.2) !important;
+}

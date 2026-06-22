@@ -1,0 +1,88 @@
+/* ── MODE CLAIR ─────────────────────────────────────────────────── */
+body.light-mode {
+  background: #f8fafc !important;
+}
+
+/* Sidebar */
+body.light-mode .sidebar {
+  background: #ffffff !important;
+  border-right: 1px solid #e2e8f0 !important;
+}
+
+/* Tous les textes blancs → noirs */
+body.light-mode .sidebar * { color: #1e293b !important; }
+body.light-mode .sidebar button { background: transparent !important; }
+body.light-mode .sidebar button[style*="rgba(139,92,246,0.15)"] {
+  background: rgba(124,58,237,0.08) !important;
+}
+
+/* Cartes et conteneurs sombres → blancs */
+body.light-mode [style*="rgba(15,23,42"],
+body.light-mode [style*="rgba(6,11,24"],
+body.light-mode [style*="rgba(10,22,40"],
+body.light-mode [style*="background:'#0f172a'"],
+body.light-mode [style*="background:'#1e293b'"],
+body.light-mode [style*="background:'#0a1628'"] {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+
+/* Tous les textes dans les cartes */
+body.light-mode [style*="color:'#e2e8f0'"] { color: #1e293b !important; }
+body.light-mode [style*="color:'#f1f5f9'"] { color: #1e293b !important; }
+body.light-mode [style*="color:'#cbd5e1'"] { color: #334155 !important; }
+body.light-mode [style*="color:'#94a3b8'"] { color: #475569 !important; }
+body.light-mode [style*="color:'#64748b'"] { color: #64748b !important; }
+
+/* Textes blancs purs → noirs sauf sur boutons gradient */
+body.light-mode [style*="color:'#fff'"]:not([style*="linear-gradient"]) {
+  color: #1e293b !important;
+}
+
+/* Inputs */
+body.light-mode input,
+body.light-mode textarea,
+body.light-mode select {
+  background: #f1f5f9 !important;
+  color: #1e293b !important;
+  border-color: #cbd5e1 !important;
+}
+body.light-mode input::placeholder,
+body.light-mode textarea::placeholder { color: #94a3b8 !important; }
+
+/* Header */
+body.light-mode [style*="borderBottom"][style*="display:'flex'"] {
+  background: #ffffff !important;
+  border-bottom-color: #e2e8f0 !important;
+}
+
+/* Garder couleurs sémantiques */
+body.light-mode [style*="color:'#10b981'"] { color: #16a34a !important; }
+body.light-mode [style*="color:'#22c55e'"] { color: #16a34a !important; }
+body.light-mode [style*="color:'#ef4444'"] { color: #dc2626 !important; }
+body.light-mode [style*="color:'#f59e0b'"] { color: #d97706 !important; }
+body.light-mode [style*="color:'#8b5cf6'"] { color: #7c3aed !important; }
+body.light-mode [style*="color:'#a78bfa'"] { color: #7c3aed !important; }
+body.light-mode [style*="color:'#3b82f6'"] { color: #2563eb !important; }
+body.light-mode [style*="color:'#60a5fa'"] { color: #2563eb !important; }
+
+/* Boutons gradient gardent texte blanc */
+body.light-mode button[style*="linear-gradient"] { color: #ffffff !important; }
+
+/* Score circle */
+body.light-mode circle[stroke="#1e293b"] { stroke: #e2e8f0 !important; }
+
+/* Scrollbar */
+body.light-mode ::-webkit-scrollbar-track { background: #f1f5f9; }
+body.light-mode ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius:4px; }
+
+/* Variables CSS mode clair */
+body.light-mode {
+  --card-bg: #ffffff;
+  --card-border: #e2e8f0;
+  --inp-bg: #f1f5f9;
+  --inp-border: #cbd5e1;
+  --inp-color: #1e293b;
+  --bg: #f8fafc;
+  --text: #1e293b;
+}

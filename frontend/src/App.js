@@ -1,4 +1,5 @@
 import './index.css';
+import './theme.css';
 import React, { useState, useEffect, useCallback } from 'react';
 import { Briefcase, Upload, Search, Send, Star, Bell, Settings, FileText, Menu, X, ExternalLink, ChevronRight, Trash2 } from 'lucide-react';
 import { LineChart, Line, XAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
@@ -1976,6 +1977,15 @@ const Dashboard = ({ stats, profil, setActive }) => {
 };
 
 export default function App() {
+  const [isDark, setIsDark] = useState(()=>localStorage.getItem('theme')!=='light');
+  const toggleTheme = () => {
+    setIsDark(d => {
+      const next = !d;
+      localStorage.setItem('theme', next?'dark':'light');
+      document.body.classList.toggle('light-mode', !next);
+      return next;
+    });
+  };
   const [active, setActive] = useState('dashboard');
   const [notifActive, setNotifActive] = useState(false);
 
@@ -2043,6 +2053,9 @@ export default function App() {
   const [favoris, setFavoris] = useState([]);
   useEffect(()=>{const h=()=>setIsMobile(window.innerWidth<768);window.addEventListener('resize',h);return()=>window.removeEventListener('resize',h);},[]);
   useEffect(()=>{
+    if(localStorage.getItem('theme')==='light') document.body.classList.add('light-mode');
+  },[]);
+  useEffect(()=>{
     axios.get(API+'/profil').then(r=>setProfil(r.data)).catch(()=>setProfil(null));
     axios.get(API+'/stats').then(r=>setStats(r.data)).catch(()=>{});
     axios.get(API+'/favoris').then(r=>setFavoris((r.data||[]).map(f=>f.job_id))).catch(()=>{});
@@ -2088,6 +2101,9 @@ export default function App() {
           {isMobile&&<button onClick={()=>setSidebarOpen(true)} style={{background:'transparent',border:'none',color:'#94a3b8',cursor:'pointer'}}><Menu size={22}/></button>}
           <h1 style={{margin:0,fontSize:16,fontWeight:800}} className="text-main">{pageTitle[active]||active}</h1>
           <div style={{marginLeft:'auto',display:'flex',alignItems:'center',gap:8}}>
+            <button onClick={toggleTheme} style={{background:'transparent',border:'1px solid rgba(139,92,246,0.3)',borderRadius:8,padding:'5px 10px',cursor:'pointer',fontSize:16,lineHeight:1}} title={isDark?'Mode clair':'Mode sombre'}>
+              {isDark?'☀️':'🌙'}
+            </button>
             <button onClick={notifActive?()=>{
               setNotifActive(false);
               localStorage.removeItem('notif_active');
@@ -2107,7 +2123,7 @@ export default function App() {
             </div>
           </div>
         </div>
-        <div style={{flex:1,overflowY:'auto',padding:'16px',background:'var(--bg)',color:'var(--text)'}}>
+        <div key={isDark?'dk':'lt'} style={{flex:1,overflowY:'auto',padding:'16px',background:isDark?'#060b18':'#f8fafc',color:isDark?'#e2e8f0':'#1e293b'}}>
           {renderPage()}
         </div>
       </div>

@@ -203,6 +203,13 @@ ${cvText}`
 });
 
 // ── JOBS ─────────────────────────────────────────────────────────────────────
+app.get('/api/jobs/sources', async (req, res) => {
+  try {
+    const r = await pool.query("SELECT DISTINCT source FROM ja_jobs WHERE source IS NOT NULL AND source != '' ORDER BY source");
+    res.json(r.rows.map(r=>r.source));
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/jobs', async (req, res) => {
   try {
     const { limit=500, sort='score', contract, source, minScore=0, includeOld='false' } = req.query;

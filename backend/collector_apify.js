@@ -9,12 +9,11 @@ const pool = new Pool({
 const APIFY_TOKEN = process.env.APIFY_TOKEN || '';
 const ACTOR_ID = 'curious_coder~linkedin-jobs-scraper';
 
-const METIERS = [
-  'Product Owner', 'Data Product Manager', 'IT Product Manager',
-  'MOA AMOA chef de projet', 'Analytics Engineer', 'Data Engineer',
-  'Business Analyst', 'Chef de projet Data', 'Data Manager',
-  'Data Scientist', 'Développeur IA', 'AI Engineer'
-];
+// Métiers chargés dynamiquement depuis ja_metiers_cibles (comme collector_ft_dynamic.js)
+async function getMetiers() {
+  const r = await pool.query("SELECT metier FROM ja_metiers_cibles WHERE actif=true ORDER BY metier");
+  return r.rows.map(r => r.metier);
+}
 
 function callApify(urls, maxItems) {
   return new Promise((resolve) => {
@@ -57,6 +56,7 @@ async function insertJob(item) {
 }
 
 async function main() {
+  const METIERS = await getMetiers();
   console.log(`Collecte Apify LinkedIn démarrée — ${METIERS.length} métiers`);
   let totalNew = 0;
 

@@ -542,6 +542,10 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
   const [sort, setSort] = useState('score');
   const [minScore, setMinScore] = useState(60);
   const [sourceFilter, setSourceFilter] = useState('tous');
+  const [sourcesDisponibles, setSourcesDisponibles] = useState([]);
+  useEffect(()=>{
+    axios.get(API+'/jobs/sources').then(r=>setSourcesDisponibles(r.data||[])).catch(()=>{});
+  },[]);
   const [detail, setDetail] = useState(null);
   const [compareIds, setCompareIds] = useState([]);
   const [compareData, setCompareData] = useState(null);
@@ -659,8 +663,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
           </select>
           <select value={sourceFilter} onChange={e=>setSourceFilter(e.target.value)} style={{...G.inp,width:'auto',padding:'3px 8px',fontSize:12}}>
             <option value="tous">Toutes sources</option>
-            <option value="France Travail">France Travail</option>
-            <option value="Indeed">Indeed</option>
+            {sourcesDisponibles.map(s=><option key={s} value={s}>{s}</option>)}
           </select>
         </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:10}}>

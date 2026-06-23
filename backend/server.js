@@ -416,7 +416,7 @@ app.post('/api/recalcul-scores', async (req, res) => {
             const daysOld = Math.floor((Date.now() - pubDate) / 86400000);
             const freshnessBonus = daysOld <= 1 ? 8 : daysOld <= 3 ? 5 : daysOld <= 7 ? 3 : daysOld <= 14 ? 1 : 0;
 
-            const combined = Math.min(Math.round(normalizedSemantic * 0.8 + bonus + freshnessBonus), 99);
+            const combined = Math.min(Math.round(normalizedSemantic * 1.0 + bonus + freshnessBonus), 99);
             await pool.query('UPDATE ja_jobs SET semantic_score=$1, ia_score=$2 WHERE id=$3', [semanticScore, Math.max(combined, 1), job.id]);
           } catch(e) { continue; }
         }
@@ -1873,7 +1873,7 @@ app.post('/api/recalcul-scores-combines', async (req, res) => {
         const freshnessBonus = daysOld <= 1 ? 8 : daysOld <= 3 ? 5 : daysOld <= 7 ? 3 : daysOld <= 14 ? 1 : 0;
 
         // Score final = 80% sémantique normalisé + 20% bonus contextuel + fraîcheur
-        const combined = Math.min(Math.round(normalizedSemantic * 0.8 + bonus + freshnessBonus), 99);
+        const combined = Math.min(Math.round(normalizedSemantic * 1.0 + bonus + freshnessBonus), 99);
         await pool.query('UPDATE ja_jobs SET semantic_score=$1, ia_score=$2 WHERE id=$3',
           [semanticScore, Math.max(combined, 1), job.id]);
         updated++;

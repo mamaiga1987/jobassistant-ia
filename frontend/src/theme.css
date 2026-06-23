@@ -127,3 +127,20 @@ body.light-mode .job-avatar {
   background: #ede9fe !important;
   border-color: rgba(124,58,237,0.2) !important;
 }
+
+/* Score detail card */
+body.light-mode .score-detail-card {
+  background: #ffffff !important;
+  border-color: #e2e8f0 !important;
+}
+body.light-mode .score-detail-card * {
+  color: #1e293b !important;
+}
+body.light-mode .score-detail-card [style*="color:'#94a3b8'"],
+body.light-mode .score-detail-card [style*="color:'#475569'"] {
+  color: #475569 !important;
+}
+/* Barre de progression fond */
+body.light-mode .score-detail-card [style*="rgba(30,41,59,0.8)"] {
+  background: #e2e8f0 !important;
+}

@@ -92,7 +92,7 @@ const ScoreDetail = ({ offre }) => {
         🔍 Voir le détail du score
       </button>
       {open && data && (
-        <div style={{...G.card,marginTop:8,background:'rgba(15,23,42,0.9)'}}>
+        <div className='score-detail-card' style={{...G.card,marginTop:8,background:'rgba(15,23,42,0.9)'}}>
           <div style={{fontSize:13,fontWeight:700,color:'#fff',marginBottom:10}}>Score: {data.total}% — Détail</div>
           {data.details.map((d,i)=>(
             <div key={i} style={{marginBottom:8}}>

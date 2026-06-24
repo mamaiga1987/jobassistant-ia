@@ -1,0 +1,22 @@
+# Ansible — Automatisation infrastructure Mohamed
+0 2 * * * ansible-playbook -i /opt/ansible/inventory.ini /opt/ansible/backup_postgresql.yml --vault-password-file <(echo "ansible123") >> /opt/ansible/logs/backup.log 2>&1
+0 * * * * ansible-playbook -i /opt/ansible/inventory.ini /opt/ansible/monitoring.yml >> /opt/ansible/logs/monitoring.log 2>&1
+0 3 * * 0 ansible-playbook -i /opt/ansible/inventory.ini /opt/ansible/maintenance.yml --become >> /opt/ansible/logs/maintenance.log 2>&1
+30 2 * * * ansible-playbook -i /opt/ansible/inventory.ini /opt/ansible/git_push.yml >> /opt/ansible/logs/git_push.log 2>&1
+@reboot sleep 10 && python3 /opt/bi-stack/chunker_service.py >> /opt/ansible/logs/chunker.log 2>&1 &
+45 6 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/alertes/check-top-offres
+45 12 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/alertes/check-top-offres
+45 18 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/alertes/check-top-offres
+@reboot sleep 30 && ansible-playbook -i /opt/ansible/inventory.ini /opt/ansible/fix_postgres_ip.yml >> /opt/ansible/logs/reboot.log 2>&1
+0 8 * * 1-5 docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/rappels/envoyer
+0 * * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/alertes/check-instant
+0 8 * * 1 docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/rapports/hebdomadaire > /dev/null 2>&1
+0 6,18 * * * docker exec jobassistant-backend node collector_ft_dynamic.js >> /opt/jobassistant/collector.log 2>&1
+30 6,11,17 * * 1-5 docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/candidatures/preparation-auto > /dev/null 2>&1
+30 6,18 * * * docker exec jobassistant-backend node collector_apify.js >> /opt/jobassistant/collector.log 2>&1
+15 6 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores > /dev/null 2>&1
+20 6 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores-semantiques > /dev/null 2>&1
+45 6 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores-combines > /dev/null 2>&1
+15 18 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores > /dev/null 2>&1
+20 18 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores-semantiques > /dev/null 2>&1
+45 18 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores-combines > /dev/null 2>&1

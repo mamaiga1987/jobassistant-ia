@@ -1012,7 +1012,7 @@ app.get('/api/profil/cv-pdf-download', async (req, res) => {
     doc.pipe(res);
 
     // En-tête
-    doc.fontSize(22).fillColor('#1e3a5f').text(profil.nom||'Mohamed Assalia Maiga', {align:'left'});
+    doc.fontSize(22).fillColor('#1e3a5f').text(profil.nom||'Mohamed Assalia Maiga', {align:'center'});
     doc.fontSize(13).fillColor('#2d6a9f').text(profil.titre||'Product Owner Data & IA', {align:'left'});
     doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement');
     doc.moveDown(0.5);
@@ -1023,13 +1023,13 @@ app.get('/api/profil/cv-pdf-download', async (req, res) => {
 
     // Profil
     doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('PROFIL');
-    doc.fontSize(10).fillColor('#333').font('Helvetica').text(profil.resume||('Product Owner Data & IA avec '+(profil.annees_experience||9)+" ans d'experience en telecommunications."));
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text(profil.resume||('Product Owner Data & IA avec '+(profil.annees_experience||9)+" ans d'experience en telecommunications."), {align:'justify'});
     doc.moveDown(0.5);
 
     // Certifications
     if((profil.certifications||[]).length>0){
       doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('CERTIFICATIONS');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text((profil.certifications||[]).join(' · '));
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((profil.certifications||[]).join(' · '), {align:'justify'});
       doc.moveDown(0.5);
     }
 
@@ -1037,7 +1037,7 @@ app.get('/api/profil/cv-pdf-download', async (req, res) => {
     if((profil.competences||[]).length>0){
       doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('COMPÉTENCES TECHNIQUES');
       const comps = (profil.competences||[]).join(', ');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text(comps);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(comps, {align:'justify'});
       doc.moveDown(0.5);
     }
 
@@ -1052,13 +1052,13 @@ app.get('/api/profil/cv-pdf-download', async (req, res) => {
     exps.forEach(e=>{
       doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre);
       doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode);
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text(e.desc);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(e.desc, {align:'justify'});
       doc.moveDown(0.3);
     });
 
     // Formation
     doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('FORMATION');
-    doc.fontSize(10).fillColor('#333').font('Helvetica').text('Master Composants et Antennes — Télécommunications | Université Paris-Sud (Paris XI) | 2014–2016');
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text('Master Composants et Antennes — Télécommunications | Université Paris-Sud (Paris XI) | 2014–2016', {align:'justify'});
 
     doc.end();
   } catch(e) { res.status(500).json({error:e.message}); }
@@ -2298,7 +2298,7 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
     res.setHeader('Content-Disposition','attachment; filename=CV_Optimise_'+(d.nom||'candidat').replace(/\s/g,'_')+'.pdf');
     doc.pipe(res);
 
-    doc.fontSize(22).fillColor('#1e3a5f').text(d.nom||'Candidat');
+    doc.fontSize(22).fillColor('#1e3a5f').text(d.nom||'Candidat', {align:'center'});
     doc.fontSize(13).fillColor('#2d6a9f').text(d.titre_accroche||'');
     doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement');
     doc.moveDown(0.5);
@@ -2306,18 +2306,18 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
     doc.moveDown(0.5);
 
     doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('PROFIL');
-    doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.resume||'');
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.resume||'', {align:'justify'});
     doc.moveDown(0.5);
 
     if((d.certifications||[]).length>0){
       doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('CERTIFICATIONS');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.certifications||[]).join(' · '));
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.certifications||[]).join(' · '), {align:'justify'});
       doc.moveDown(0.5);
     }
 
     if((d.competences_ordonnees||[]).length>0){
       doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('COMPÉTENCES TECHNIQUES');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.competences_ordonnees||[]).join(', '));
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.competences_ordonnees||[]).join(', '), {align:'justify'});
       doc.moveDown(0.5);
     }
 
@@ -2325,13 +2325,13 @@ app.get('/api/cv-optimise/:id/pdf', async (req, res) => {
     (d.experiences||[]).forEach(e=>{
       doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre+(e.entreprise?' — '+e.entreprise:''));
       doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode||'');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/!'/g,'->').replace(/\uFFFD+/g,''));
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/!'/g,'->').replace(/\uFFFD+/g,''), {align:'justify'});
       doc.moveDown(0.3);
     });
 
     if(d.formation){
       doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('FORMATION');
-      doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.formation);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.formation, {align:'justify'});
     }
 
     doc.end();
@@ -2464,13 +2464,13 @@ app.get('/api/cv-optimise/:id/docx', async (req, res) => {
     if(r.rows.length === 0) return res.status(404).json({error:'CV optimisé non trouvé'});
     const d = r.rows[0].data;
 
-    const { Document, Packer, Paragraph, TextRun, HeadingLevel } = require('docx');
+    const { Document, Packer, Paragraph, TextRun, HeadingLevel, AlignmentType } = require('docx');
 
     const children = [];
 
     children.push(new Paragraph({
       children: [new TextRun({ text: d.nom || 'Candidat', bold: true, size: 36, color: '1e3a5f' })],
-      spacing: { after: 80 }
+      spacing: { after: 80 }, alignment: AlignmentType.CENTER
     }));
     children.push(new Paragraph({
       children: [new TextRun({ text: d.titre_accroche || '', size: 24, color: '2d6a9f' })],
@@ -2482,16 +2482,16 @@ app.get('/api/cv-optimise/:id/docx', async (req, res) => {
     }));
 
     children.push(new Paragraph({ text: 'PROFIL', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
-    children.push(new Paragraph({ children: [new TextRun({ text: d.resume || '', size: 20 })], spacing: { after: 200 } }));
+    children.push(new Paragraph({ children: [new TextRun({ text: d.resume || '', size: 20 })], spacing: { after: 200 }, alignment: AlignmentType.JUSTIFIED }));
 
     if((d.certifications||[]).length > 0) {
       children.push(new Paragraph({ text: 'CERTIFICATIONS', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
-      children.push(new Paragraph({ children: [new TextRun({ text: (d.certifications||[]).join(' · '), size: 20 })], spacing: { after: 200 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: (d.certifications||[]).join(' · '), size: 20 })], spacing: { after: 200 }, alignment: AlignmentType.JUSTIFIED }));
     }
 
     if((d.competences_ordonnees||[]).length > 0) {
       children.push(new Paragraph({ text: 'COMPÉTENCES TECHNIQUES', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
-      children.push(new Paragraph({ children: [new TextRun({ text: (d.competences_ordonnees||[]).join(', '), size: 20 })], spacing: { after: 200 } }));
+      children.push(new Paragraph({ children: [new TextRun({ text: (d.competences_ordonnees||[]).join(', '), size: 20 })], spacing: { after: 200 }, alignment: AlignmentType.JUSTIFIED }));
     }
 
     children.push(new Paragraph({ text: 'EXPÉRIENCES PROFESSIONNELLES', heading: HeadingLevel.HEADING_2, spacing: { before: 100, after: 80 } }));
@@ -2506,14 +2506,14 @@ app.get('/api/cv-optimise/:id/docx', async (req, res) => {
       }));
       (e.description || '').replace(/\uFFFD+/g,'').split('\n').forEach(line => {
         if(line.trim()) {
-          children.push(new Paragraph({ children: [new TextRun({ text: line.trim().replace(/^[-●]\s*/, '• '), size: 19 })], spacing: { after: 40 } }));
+          children.push(new Paragraph({ children: [new TextRun({ text: line.trim().replace(/^[-●]\s*/, '• '), size: 19 })], spacing: { after: 40 }, alignment: AlignmentType.JUSTIFIED }));
         }
       });
     });
 
     if(d.formation) {
       children.push(new Paragraph({ text: 'FORMATION', heading: HeadingLevel.HEADING_2, spacing: { before: 150, after: 80 } }));
-      children.push(new Paragraph({ children: [new TextRun({ text: d.formation, size: 20 })] }));
+      children.push(new Paragraph({ children: [new TextRun({ text: d.formation, size: 20 })], alignment: AlignmentType.JUSTIFIED }));
     }
 
     const doc = new Document({ sections: [{ properties: {}, children }] });

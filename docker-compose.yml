@@ -9,6 +9,7 @@ services:
     env_file: .env
     volumes:
       - /data/jobassistant-cv:/data/jobassistant-cv
+      - /opt/jobassistant/crontab_host.txt:/app/crontab_host.txt:ro
     networks:
       - web
       - jobassistant-internal

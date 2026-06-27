@@ -47,6 +47,7 @@ const navItems = [
   {id:'questions',icon:<FileText size={18}/>,label:'Banque de questions'},
   {id:'formations',icon:<Star size={18}/>,label:'Formations recommandees'},
   {id:'veille-comp',icon:<Search size={18}/>,label:'Veille competences'},
+  {id:'crons',icon:<Settings size={18}/>,label:'Paramètres Crons'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -2164,7 +2165,78 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences','crons':'Paramètres Crons'};
+
+const CronsPage = () => {
+  const [crons, setCrons] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [toggling, setToggling] = React.useState({});
+  const [executing, setExecuting] = React.useState({});
+  const COLORS = {'Collecte':'#3b82f6','Scoring':'#8b5cf6','Candidatures':'#10b981','Alertes':'#f59e0b','Notifications':'#c084fc','Infrastructure':'#64748b'};
+
+  const charger = async () => {
+    setLoading(true);
+    try { const r = await axios.get(API+'/crons'); setCrons(r.data); } catch(e) {}
+    setLoading(false);
+  };
+
+  React.useEffect(()=>{ charger(); },[]);
+
+  const toggleCron = async (id) => {
+    setToggling(t=>({...t,[id]:true}));
+    try { const r = await axios.post(API+'/crons/'+id+'/toggle'); alert(r.data.message); charger(); }
+    catch(e) { alert('Erreur: '+e.message); }
+    setToggling(t=>({...t,[id]:false}));
+  };
+
+  const executerCron = async (id, label) => {
+    if(!window.confirm('Exécuter maintenant: '+label+' ?')) return;
+    setExecuting(e=>({...e,[id]:true}));
+    try { await axios.post(API+'/crons/'+id+'/executer'); alert('Démarré en arrière-plan'); }
+    catch(e) { alert('Erreur: '+e.message); }
+    setTimeout(()=>setExecuting(e=>({...e,[id]:false})),3000);
+  };
+
+  const categories = [...new Set(crons.map(c=>c.categorie))];
+
+  if(loading) return <div style={{textAlign:'center',padding:40,color:'#94a3b8'}}>Chargement...</div>;
+
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:16,background:'rgba(139,92,246,0.06)',border:'1px solid rgba(139,92,246,0.2)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#a78bfa',marginBottom:4}}>⚙️ Gestionnaire de Crons</div>
+        <div style={{fontSize:11,color:'#94a3b8'}}>Activez, désactivez ou exécutez manuellement les tâches automatiques.</div>
+      </div>
+      {categories.map(cat=>(
+        <div key={cat} style={{marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:COLORS[cat]||'#a78bfa',marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
+            <div style={{width:8,height:8,borderRadius:'50%',background:COLORS[cat]||'#a78bfa'}}/>
+            {cat}
+          </div>
+          {crons.filter(c=>c.categorie===cat).map(cron=>(
+            <div key={cron.id} style={{...G.card,marginBottom:8,padding:12,display:'flex',alignItems:'center',gap:10,opacity:cron.actif?1:0.6}}>
+              <div style={{flex:1}}>
+                <div style={{fontSize:13,fontWeight:600,color:'#e2e8f0',marginBottom:2}}>{cron.label}</div>
+                <div style={{fontSize:11,color:'#94a3b8'}}>🕐 {cron.heure_fr}</div>
+                <div style={{fontSize:10,color:'#64748b',fontFamily:'monospace',marginTop:2}}>{cron.schedule}</div>
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <button onClick={()=>executerCron(cron.id,cron.label)} disabled={executing[cron.id]} style={{...G.btn,padding:'4px 10px',fontSize:11,background:'rgba(59,130,246,0.2)',color:'#60a5fa',border:'1px solid rgba(59,130,246,0.3)'}}>
+                  {executing[cron.id]?'...':'▶ Run'}
+                </button>
+                <button onClick={()=>toggleCron(cron.id)} disabled={toggling[cron.id]} style={{...G.btn,padding:'4px 10px',fontSize:11,background:cron.actif?'rgba(34,197,94,0.2)':'rgba(239,68,68,0.2)',color:cron.actif?'#22c55e':'#ef4444',border:'1px solid '+(cron.actif?'rgba(34,197,94,0.3)':'rgba(239,68,68,0.3)')}}>
+                  {toggling[cron.id]?'...':(cron.actif?'✅ Actif':'❌ Inactif')}
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+      <button onClick={charger} style={{...G.btn,width:'100%',padding:'10px',fontSize:12,background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)'}}>🔄 Rafraîchir</button>
+    </div>
+  );
+};
+
   const renderPage = () => {
     switch(active) {
       case 'dashboard': return <Dashboard stats={stats} profil={profil} setActive={setActive}/>;
@@ -2184,7 +2256,8 @@ export default function App() {
       case 'offre-libre': return <OffreLibrePage key={Date.now()}/>;
       case 'questions': return <BanqueQuestionsPage key={Date.now()}/>;
       case 'formations': return <FormationsPage key={Date.now()}/>;
-      case 'veille-comp': return <VeilleCompetencesPage key={Date.now()}/>;
+      case 'veille-comp': return <VeilleCompetencesPage key={Date.now()}/>
+      case 'crons': return <CronsPage/>;
       default: return null;
     }
   };

@@ -2711,6 +2711,91 @@ ${lettre ? `<p style="white-space:pre-wrap;line-height:1.7">${lettre}</p>` : `<p
     res.json({success:true, message:'Candidature envoyée avec succès'});
   } catch(e) { res.status(500).json({error: e.message}); }
 });
+
+// ── GESTION DES CRONS ─────────────────────────────────────────────────────────
+const { exec: execCron } = require('child_process');
+
+const CRONS_CONFIG = [
+  { id:'collecte_ft', label:'Collecte France Travail', schedule:'0 6,18 * * *', heure_fr:'8h00 et 20h00', categorie:'Collecte', cmd:'docker exec jobassistant-backend node collector_ft_dynamic.js' },
+  { id:'collecte_linkedin', label:'Collecte LinkedIn (Apify)', schedule:'30 6,18 * * *', heure_fr:'8h30 et 20h30', categorie:'Collecte', cmd:'docker exec jobassistant-backend node collector_apify.js' },
+  { id:'scores_mots_cles', label:'Recalcul scores mots-clés', schedule:'15 6,18 * * *', heure_fr:'8h15 et 20h15', categorie:'Scoring', cmd:'recalcul-scores' },
+  { id:'scores_semantiques', label:'Vectorisation sémantique', schedule:'20 6,18 * * *', heure_fr:'8h20 et 20h20', categorie:'Scoring', cmd:'recalcul-scores-semantiques' },
+  { id:'scores_combines', label:'Scores combinés finaux', schedule:'45 6,18 * * *', heure_fr:'8h45 et 20h45', categorie:'Scoring', cmd:'recalcul-scores-combines' },
+  { id:'candidatures_auto', label:'Préparation candidatures (5/jour)', schedule:'30 6,11,17 * * 1-5', heure_fr:'8h30 / 13h00 / 19h30 (lun-ven)', categorie:'Candidatures', cmd:'candidatures/preparation-auto' },
+  { id:'emails_auto', label:'Envoi emails recruteurs', schedule:'0 7 * * 1-5', heure_fr:'9h00 (lun-ven)', categorie:'Candidatures', cmd:'sender_email_auto.js' },
+  { id:'alertes_top', label:'Alertes top offres', schedule:'45 6,12,18 * * *', heure_fr:'8h45 / 14h45 / 20h45', categorie:'Alertes', cmd:'alertes/check-top-offres' },
+  { id:'alertes_instant', label:'Alertes instantanées', schedule:'0 * * * *', heure_fr:'Toutes les heures', categorie:'Alertes', cmd:'alertes/check-instant' },
+  { id:'rappels', label:'Rappels quotidiens', schedule:'0 8 * * 1-5', heure_fr:'10h00 (lun-ven)', categorie:'Notifications', cmd:'rappels/envoyer' },
+  { id:'rapport_hebdo', label:'Rapport hebdomadaire', schedule:'0 8 * * 1', heure_fr:'10h00 (lundi)', categorie:'Notifications', cmd:'rapports/hebdomadaire' },
+  { id:'backup_pg', label:'Backup PostgreSQL', schedule:'0 2 * * *', heure_fr:'4h00', categorie:'Infrastructure', cmd:'ansible backup_postgresql' },
+  { id:'monitoring', label:'Monitoring infrastructure', schedule:'0 * * * *', heure_fr:'Toutes les heures', categorie:'Infrastructure', cmd:'ansible monitoring' },
+];
+
+app.get('/api/crons', async (req, res) => {
+  try {
+    const fs = require('fs');
+    const crontabRaw = fs.existsSync('/app/crontab_host.txt') ? fs.readFileSync('/app/crontab_host.txt', 'utf8') : '';
+    const cronActifs = crontabRaw.split('\n').filter(l => l.trim() && !l.startsWith('#'));
+    
+    const result = CRONS_CONFIG.map(c => {
+      const desactive = cronActifs.some(line =>
+        line.startsWith('#DISABLED#') && line.includes(c.cmd)
+      );
+      const actif = cronActifs.some(line =>
+        !line.startsWith('#DISABLED#') && line.includes(c.cmd)
+      );
+      return { ...c, actif, desactive };
+    });
+    
+    res.json(result);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/crons/:id/toggle', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cron = CRONS_CONFIG.find(c => c.id === id);
+    if(!cron) return res.status(404).json({ error: 'Cron non trouvé' });
+
+    const fs = require('fs');
+    const crontabRaw = fs.existsSync('/app/crontab_host.txt') ? fs.readFileSync('/app/crontab_host.txt', 'utf8') : '';
+    let lines = crontabRaw.split('\n');
+    
+    const lineIndex = lines.findIndex(l => l.includes(cron.cmd));
+    if(lineIndex === -1) return res.status(404).json({ error: 'Ligne cron non trouvée' });
+    
+    const line = lines[lineIndex];
+    if(line.startsWith('#DISABLED#')) {
+      // Réactiver
+      lines[lineIndex] = line.replace('#DISABLED#', '').trim();
+      res.json({ status: 'actif', message: `${cron.label} activé` });
+    } else {
+      // Désactiver
+      lines[lineIndex] = '#DISABLED#' + line;
+      res.json({ status: 'desactive', message: `${cron.label} désactivé` });
+    }
+    
+    const newCrontab = lines.filter(l => l !== undefined).join('\n');
+    const tmpFile = '/tmp/crontab_tmp';
+    require('fs').writeFileSync(tmpFile, newCrontab);
+    require('child_process').execSync(`crontab ${tmpFile}`);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/crons/:id/executer', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const cron = CRONS_CONFIG.find(c => c.id === id);
+    if(!cron) return res.status(404).json({ error: 'Cron non trouvé' });
+    res.json({ status: 'started', message: `${cron.label} démarré` });
+    // Exécuter en arrière-plan
+    if(cron.cmd.startsWith('docker exec')) {
+      execCron(cron.cmd + ' >> /opt/jobassistant/collector.log 2>&1');
+    } else {
+      execCron(`docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/${cron.cmd} > /dev/null 2>&1`);
+    }
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 // ── PRÉPARATION AUTOMATIQUE DES CANDIDATURES TOP-SCORE ───────────────────────
 app.post('/api/candidatures/preparation-auto', async (req, res) => {
   try {

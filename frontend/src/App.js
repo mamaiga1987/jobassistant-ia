@@ -296,6 +296,7 @@ const CVOptimise = ({ offre }) => {
   };
 
   const telechargerPDF = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/pdf', '_blank');
+
   const telechargerDOCX = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/docx', '_blank');
   const genererLettre = async () => {
     if(!data) return;
@@ -1339,6 +1340,9 @@ const OffreLibrePage = () => {
   const [lettre, setLettre] = React.useState('');
   const [lettreLoading, setLettreLoading] = React.useState(false);
   const [detectingTitre, setDetectingTitre] = React.useState(false);
+  const [emailRecruteur, setEmailRecruteur] = React.useState('');
+  const [sendingEmail, setSendingEmail] = React.useState(false);
+  const [emailSent, setEmailSent] = React.useState(false);
 
   // Sauvegarde brouillon automatique
   React.useEffect(() => {
@@ -1354,6 +1358,14 @@ const OffreLibrePage = () => {
       setShowHistorique(true);
     }).catch(()=>{});
   };
+
+  // Detection automatique email dans le texte de l'offre
+  React.useEffect(() => {
+    if(texteOffre.trim().length > 30 && !emailRecruteur) {
+      const emailMatch = texteOffre.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+      if(emailMatch) setEmailRecruteur(emailMatch[0]);
+    }
+  }, [texteOffre]);
 
   const detecterTitre = async () => {
     if(texteOffre.trim().length < 30 || titreOffre.trim()) return;
@@ -1437,6 +1449,26 @@ const OffreLibrePage = () => {
 
   const telechargerPDF = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/pdf', '_blank');
   const telechargerDOCX = () => window.open(API+'/cv-optimise/'+data.cv_optimise_id+'/docx', '_blank');
+  const envoyerCandidature = async () => {
+    if(!emailRecruteur || !emailRecruteur.includes('@')) {
+      alert('Veuillez saisir un email valide');
+      return;
+    }
+    setSendingEmail(true);
+    try {
+      await axios.post(API+'/candidatures/envoyer-email', {
+        cv_optimise_id: data.cv_optimise_id,
+        email_recruteur: emailRecruteur,
+        titre_offre: titreOffre,
+        lettre: lettre
+      }, {timeout: 30000});
+      setEmailSent(true);
+      alert('Candidature envoyée avec succès ! Vous êtes en copie.');
+    } catch(e) {
+      alert('Erreur lors de l\'envoi : ' + (e.response?.data?.error || e.message));
+    }
+    setSendingEmail(false);
+  };
 
   return (
     <div>
@@ -1507,6 +1539,14 @@ const OffreLibrePage = () => {
             <button onClick={telechargerDOCX} style={{...G.btn,flex:1,padding:'10px',fontSize:12,background:'rgba(59,130,246,0.3)',color:'#60a5fa'}}>
               📥 Word
             </button>
+          </div>
+          <div style={{marginBottom:8}}>
+            <input value={emailRecruteur} onChange={e=>setEmailRecruteur(e.target.value)} placeholder="Email recruteur (auto-détecté ou saisir manuellement)" type="email" style={{...G.inp,fontSize:12,marginBottom:6}}/>
+            {emailRecruteur && emailRecruteur.includes('@') && (
+              <button onClick={envoyerCandidature} disabled={sendingEmail||emailSent} style={{...G.btn,width:'100%',padding:'10px',fontSize:12,background:emailSent?'rgba(34,197,94,0.2)':"rgba(16,185,129,0.2)",color:emailSent?'#22c55e':'#10b981',border:'1px solid '+(emailSent?'rgba(34,197,94,0.3)':'rgba(16,185,129,0.3)')}}>  
+                {emailSent?'✅ Candidature envoyée !':sendingEmail?'Envoi en cours...':'📧 Envoyer ma candidature par email'}
+              </button>
+            )}
           </div>
 
           <button onClick={()=>setShowApercu(!showApercu)} style={{...G.btn,width:'100%',padding:'8px',fontSize:11,background:'transparent',color:'#94a3b8',border:'1px solid #334155',marginBottom:8}}>

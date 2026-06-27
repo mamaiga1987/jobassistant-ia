@@ -2620,6 +2620,96 @@ Retourne UNIQUEMENT le texte de la lettre, sans en-tete ni metadonnees, pret a e
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 
+
+// ── ENVOYER CANDIDATURE PAR EMAIL ─────────────────────────────────────────────
+app.post('/api/candidatures/envoyer-email', async (req, res) => {
+  try {
+    const { cv_optimise_id, email_recruteur, titre_offre, lettre } = req.body;
+    if(!email_recruteur || !cv_optimise_id) return res.status(400).json({error:'email_recruteur et cv_optimise_id requis'});
+
+    const cvRow = await pool.query('SELECT data FROM ja_cv_optimises WHERE id=$1 AND status=$2', [cv_optimise_id, 'done']);
+    if(cvRow.rows.length === 0) return res.status(404).json({error:'CV non trouvé'});
+
+    // Générer le PDF en mémoire
+    const PDFDocument = require('pdfkit');
+    const d = cvRow.rows[0].data;
+    const doc = new PDFDocument({margin:50, size:'A4'});
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+    const pdfReady = new Promise(resolve => doc.on('end', resolve));
+
+    doc.fontSize(22).fillColor('#1e3a5f').text(d.nom||'Mohamed Assalia Maiga', {align:'center'});
+    doc.fontSize(13).fillColor('#2d6a9f').text(d.titre_accroche||'', {align:'left'});
+    doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement');
+    doc.moveDown(0.5);
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('PROFIL');
+    doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f');
+    doc.moveDown(0.2);
+    doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.resume||'', {align:'justify'});
+    doc.moveDown(0.5);
+    if((d.certifications||[]).length > 0) {
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('CERTIFICATIONS');
+      doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f');
+      doc.moveDown(0.2);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.certifications||[]).join(' · '), {align:'justify'});
+      doc.moveDown(0.5);
+    }
+    if((d.competences_ordonnees||[]).length > 0) {
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('COMPÉTENCES TECHNIQUES');
+      doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f');
+      doc.moveDown(0.2);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.competences_ordonnees||[]).join(', '), {align:'justify'});
+      doc.moveDown(0.5);
+    }
+    doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('EXPÉRIENCES PROFESSIONNELLES');
+    doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f');
+    doc.moveDown(0.2);
+    (d.experiences||[]).forEach(e => {
+      doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text(e.titre+(e.entreprise?' — '+e.entreprise:''));
+      doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode||'');
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/�+/g,''), {align:'justify'});
+      doc.moveDown(0.3);
+    });
+    if(d.formation) {
+      doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('FORMATION');
+      doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f');
+      doc.moveDown(0.2);
+      doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.formation, {align:'justify'});
+    }
+    doc.end();
+    await pdfReady;
+    const pdfBuffer = Buffer.concat(chunks);
+
+    // Envoyer l'email
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({service:'gmail', auth:{user:'mmohamedassalia6@gmail.com', pass:process.env.GMAIL_PASS||''}});
+    const nomCandidat = d.nom || 'Mohamed Assalia Maiga';
+    const titrPoste = titre_offre || d.titre_accroche || 'le poste';
+
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:20px">
+<h2 style="color:#1e3a5f">Candidature — ${titrPoste}</h2>
+<p>Madame, Monsieur,</p>
+${lettre ? `<p style="white-space:pre-wrap;line-height:1.7">${lettre}</p>` : `<p>Veuillez trouver ci-joint mon CV pour le poste de <strong>${titrPoste}</strong>.</p><p>Je reste disponible pour un entretien à votre convenance.</p><p>Cordialement,<br><strong>${nomCandidat}</strong></p>`}
+<hr style="margin:20px 0;border:none;border-top:1px solid #e2e8f0"/>
+<p style="font-size:12px;color:#64748b">Candidature générée via JobAssistant IA</p>
+</body></html>`;
+
+    await transporter.sendMail({
+      from: `${nomCandidat} <mmohamedassalia6@gmail.com>`,
+      to: email_recruteur,
+      cc: 'mmohamedassalia6@gmail.com',
+      subject: `Candidature — ${titrPoste} — ${nomCandidat}`,
+      html,
+      attachments: [{
+        filename: `CV_${nomCandidat.replace(/\s/g,'_')}_${titrPoste.replace(/[^a-zA-Z0-9]/g,'_').slice(0,30)}.pdf`,
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      }]
+    });
+
+    res.json({success:true, message:'Candidature envoyée avec succès'});
+  } catch(e) { res.status(500).json({error: e.message}); }
+});
 // ── PRÉPARATION AUTOMATIQUE DES CANDIDATURES TOP-SCORE ───────────────────────
 app.post('/api/candidatures/preparation-auto', async (req, res) => {
   try {

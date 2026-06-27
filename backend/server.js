@@ -2838,7 +2838,7 @@ Retourne UNIQUEMENT le texte de la lettre.`;
             await pool.query('INSERT INTO ja_candidatures_auto (job_id, verdict, score_match, cv_optimise_id, lettre, analyse_match) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (job_id) DO UPDATE SET verdict=$2, score_match=$3, cv_optimise_id=$4, lettre=$5, analyse_match=$6',
               [job.id, matchData.verdict, matchData.score_match, cvOptimiseId, lettre, JSON.stringify(matchData)]);
 
-            retenues.push({ job, matchData, cvOptimiseId, lettre });
+            retenues.push({ job, matchData, cvOptimiseId, lettre, emailContact: job.email_contact || null });
             console.log(`✅ Préparé: ${job.title} (${matchData.verdict})`);
           } catch(e) {
             console.log(`Erreur préparation offre ${job.id}:`, e.message);
@@ -2846,6 +2846,39 @@ Retourne UNIQUEMENT le texte de la lettre.`;
         }
 
         // 4. Email récapitulatif
+        // Envoi automatique pour les offres avec email_contact
+        for(const r of retenues) {
+          if(r.emailContact) {
+            try {
+              const nodemailerAuto = require('nodemailer');
+              const transporterAuto = nodemailerAuto.createTransport({service:'gmail',auth:{user:'mmohamedassalia6@gmail.com',pass:process.env.GMAIL_PASS||''}});
+              const cvRowAuto = await pool.query('SELECT data FROM ja_cv_optimises WHERE id=$1', [r.cvOptimiseId]);
+              const dAuto = cvRowAuto.rows[0]?.data || {};
+              const htmlAuto = `<h2>Candidature — ${r.job.title}</h2><p>${r.lettre||'Veuillez trouver ci-joint mon CV.'}</p>`;
+              const PDFDocumentAuto = require('pdfkit');
+              const docAuto = new PDFDocumentAuto({margin:50,size:'A4'});
+              const chunksAuto = [];
+              docAuto.on('data',c=>chunksAuto.push(c));
+              const pdfReadyAuto = new Promise(res=>docAuto.on('end',res));
+              docAuto.fontSize(22).fillColor('#1e3a5f').text(dAuto.nom||'Mohamed Assalia Maiga',{align:'center'});
+              docAuto.fontSize(13).fillColor('#2d6a9f').text(dAuto.titre_accroche||'');
+              docAuto.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com');
+              docAuto.end();
+              await pdfReadyAuto;
+              const pdfBufferAuto = Buffer.concat(chunksAuto);
+              await transporterAuto.sendMail({
+                from:`${dAuto.nom||'Mohamed Assalia Maiga'} <mmohamedassalia6@gmail.com>`,
+                to: r.emailContact,
+                cc: 'mmohamedassalia6@gmail.com',
+                subject: `Candidature — ${r.job.title} — ${dAuto.nom||'Mohamed Assalia Maiga'}`,
+                html: htmlAuto,
+                attachments:[{filename:`CV_${(dAuto.nom||'candidat').replace(/\s/g,'_')}.pdf`,content:pdfBufferAuto,contentType:'application/pdf'}]
+              });
+              console.log(`📧 Email envoyé automatiquement à ${r.emailContact} pour ${r.job.title}`);
+            } catch(eAuto) { console.log('Erreur envoi auto:', eAuto.message); }
+          }
+        }
+
         if(retenues.length > 0) {
           const nodemailer = require('nodemailer');
           const transporter = nodemailer.createTransport({service:'gmail',auth:{user:'mmohamedassalia6@gmail.com',pass:process.env.GMAIL_PASS||''}});

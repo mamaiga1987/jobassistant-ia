@@ -623,6 +623,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
           <button onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px'}}><Send size={14}/> Postuler</button>
           {detail.url&&<a href={detail.url} target="_blank" rel="noopener noreferrer" onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px',background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',textDecoration:'none'}}><ExternalLink size={14}/> Voir offre</a>}
+          {detail.email_contact&&<a href={'mailto:'+detail.email_contact+'?subject=Candidature — '+encodeURIComponent(detail.title)+'&body=Bonjour,%0A%0AJe vous adresse ma candidature pour le poste de '+encodeURIComponent(detail.title)+'.'} style={{...G.btn,padding:'12px',background:'rgba(16,185,129,0.15)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)',textDecoration:'none'}}>📧 {detail.email_contact}</a>}
         </div>
         <FicheEntreprise offre={detail}/>
         <ReponsesSTAR offre={detail}/>

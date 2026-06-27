@@ -536,6 +536,53 @@ const LettreMotivationIA = ({ offre }) => {
   );
 };
 
+
+const EnvoiEmailOffre = ({ job }) => {
+  const [sending, setSending] = React.useState(false);
+  const [sent, setSent] = React.useState(false);
+  const [error, setError] = React.useState('');
+
+  const envoyer = async () => {
+    setSending(true);
+    setError('');
+    try {
+      const start = await axios.post(API+'/jobs/'+job.id+'/cv-optimise', {}, {timeout:15000});
+      const cvId = start.data.cv_optimise_id;
+      let attempts = 0;
+      let cvData = null;
+      while(attempts < 24) {
+        await new Promise(r=>setTimeout(r,5000));
+        const status = await axios.get(API+'/cv-optimise/'+cvId+'/status', {timeout:10000});
+        if(status.data.status === 'done') { cvData = status.data; break; }
+        attempts++;
+      }
+      if(!cvData) { setError('Timeout generation CV'); setSending(false); return; }
+      const lettreRes = await axios.post(API+'/cv-optimise/'+cvId+'/lettre', {
+        texte_offre: job.description, titre_offre: job.title
+      }, {timeout:30000});
+      await axios.post(API+'/candidatures/envoyer-email', {
+        cv_optimise_id: cvId,
+        email_recruteur: job.email_contact,
+        titre_offre: job.title,
+        lettre: lettreRes.data.lettre || ''
+      }, {timeout:30000});
+      setSent(true);
+    } catch(e) {
+      setError(e.response?.data?.error || e.message);
+    }
+    setSending(false);
+  };
+
+  return (
+    <div>
+      <button onClick={envoyer} disabled={sending||sent} style={{...G.btn,padding:'12px',background:sent?'rgba(34,197,94,0.2)':'rgba(16,185,129,0.15)',color:sent?'#22c55e':'#10b981',border:'1px solid '+(sent?'rgba(34,197,94,0.3)':'rgba(16,185,129,0.3)')}}>
+        {sent?'Candidature envoyee !':sending?'Generation & envoi...':'Envoyer CV a '+job.email_contact}
+      </button>
+      {error&&<div style={{fontSize:11,color:'#ef4444',marginTop:4}}>{error}</div>}
+    </div>
+  );
+};
+
 const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) => {
   const [jobs, setJobs] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -543,6 +590,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
   const [sort, setSort] = useState('score');
   const [minScore, setMinScore] = useState(60);
   const [sourceFilter, setSourceFilter] = useState('tous');
+  const [emailFilter, setEmailFilter] = useState(false);
   const [sourcesDisponibles, setSourcesDisponibles] = useState([]);
   useEffect(()=>{
     axios.get(API+'/jobs/sources').then(r=>setSourcesDisponibles(r.data||[])).catch(()=>{});
@@ -558,13 +606,14 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
       try {
         let url = search ? API+'/search?q='+encodeURIComponent(search)+'&sort='+sort : API+'/jobs?limit=500&sort='+sort+'&minScore='+minScore;
         if (sourceFilter && sourceFilter !== 'tous') url += '&source='+encodeURIComponent(sourceFilter);
+        if (emailFilter) url += '&withEmail=true';
         const r = await axios.get(url);
         setJobs(Array.isArray(r.data)?r.data:[]);
       } catch(e) { console.error(e); }
       setLoading(false);
     };
     load();
-  }, [search, sort, sourceFilter, minScore]);
+  }, [search, sort, sourceFilter, minScore, emailFilter]);
 
   const fetchJobs = () => {};
   const filtered = jobs;
@@ -623,7 +672,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:12}}>
           <button onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px'}}><Send size={14}/> Postuler</button>
           {detail.url&&<a href={detail.url} target="_blank" rel="noopener noreferrer" onClick={()=>onPostuler(detail)} style={{...G.btn,padding:'12px',background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',textDecoration:'none'}}><ExternalLink size={14}/> Voir offre</a>}
-          {detail.email_contact&&<a href={'mailto:'+detail.email_contact+'?subject=Candidature — '+encodeURIComponent(detail.title)+'&body=Bonjour,%0A%0AJe vous adresse ma candidature pour le poste de '+encodeURIComponent(detail.title)+'.'} style={{...G.btn,padding:'12px',background:'rgba(16,185,129,0.15)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)',textDecoration:'none'}}>📧 {detail.email_contact}</a>}
+          {detail.email_contact&&<EnvoiEmailOffre job={detail}/>}
         </div>
         <FicheEntreprise offre={detail}/>
         <ReponsesSTAR offre={detail}/>
@@ -667,6 +716,9 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
             <option value="tous">Toutes sources</option>
             {sourcesDisponibles.map(s=><option key={s} value={s}>{s}</option>)}
           </select>
+          <button onClick={()=>setEmailFilter(!emailFilter)} style={{background:emailFilter?'rgba(16,185,129,0.2)':'transparent',color:emailFilter?'#10b981':'#64748b',border:'1px solid '+(emailFilter?'rgba(16,185,129,0.3)':'rgba(100,116,139,0.3)'),borderRadius:8,padding:'4px 10px',fontSize:12,cursor:'pointer'}}>
+            📧 Avec email
+          </button>
         </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:6,marginTop:10}}>
           {suggestions.map(s=><button key={s} onClick={()=>setSearch(s)} style={{background:'rgba(139,92,246,0.08)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.15)',borderRadius:20,padding:'3px 10px',fontSize:11,cursor:'pointer'}}>{s}</button>)}
@@ -682,7 +734,7 @@ const OffresPage = ({ profil, favoris, setFavoris, onPostuler, postules=[] }) =>
           <div style={{display:'flex',gap:10,alignItems:'flex-start',marginBottom:10}}>
             <div className='job-avatar' style={{width:44,height:44,borderRadius:11,background:'linear-gradient(135deg,#1e293b,#0f172a)',border:'1px solid rgba(139,92,246,0.2)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:800,color:'#8b5cf6',flexShrink:0}}>{(job.company||'?')[0].toUpperCase()}</div>
             <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:14,fontWeight:700,color:'#fff',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{job.title}</div>
+              <div style={{fontSize:14,fontWeight:700,color:'#fff',marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{job.title}{job.email_contact&&<span style={{marginLeft:6,fontSize:11,color:'#10b981'}}>📧</span>}</div>
               <div style={{fontSize:12,color:'#64748b'}}>{job.company} · {job.location} · {job.contract_type||'CDI'}</div>
             </div>
             <ScoreCircle score={job.ia_score||0} size={52}/>

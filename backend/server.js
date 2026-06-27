@@ -212,7 +212,7 @@ app.get('/api/jobs/sources', async (req, res) => {
 
 app.get('/api/jobs', async (req, res) => {
   try {
-    const { limit=500, sort='score', contract, source, minScore=0, includeOld='false' } = req.query;
+    const { limit=500, sort='score', contract, source, minScore=0, includeOld='false', withEmail } = req.query;
     const profil = await getProfil();
     let q = 'SELECT * FROM ja_jobs WHERE ia_score >= $1';
     const params = [parseInt(minScore)];
@@ -220,6 +220,7 @@ app.get('/api/jobs', async (req, res) => {
       q += ` AND published_at >= NOW() - INTERVAL '21 days'`;
     }
     if (contract) { params.push(contract); q += ` AND contract_type=$${params.length}`; }
+    if (withEmail === 'true') { q += ' AND email_contact IS NOT NULL'; }
     if (source) { params.push(source); q += ` AND source=$${params.length}`; }
     q += sort==='date' ? ' ORDER BY published_at DESC' : ' ORDER BY ia_score DESC, published_at DESC';
     q += ` LIMIT ${parseInt(limit)}`;

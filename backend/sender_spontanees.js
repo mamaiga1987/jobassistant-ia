@@ -39,26 +39,25 @@ async function findEmailHunter(entreprise, siteWeb) {
 }
 
 // Trouver email via Hunter domain-search par nom d'entreprise
-async function findEmailByName(entreprise) {
-  return new Promise((resolve) => {
-    const company = encodeURIComponent(entreprise);
-    const url = `/v2/domain-search?company=${company}&api_key=${HUNTER_KEY}&limit=1`;
-    const req = https.request({hostname:'api.hunter.io',path:url,method:'GET'}, r => {
-      let d = '';
-      r.on('data', c => d += c);
-      r.on('end', () => {
-        try {
-          const data = JSON.parse(d);
-          const emails = data.data?.emails || [];
-          const domain = data.data?.domain;
-          const rhEmail = emails.find(e => /rh|recrutement|talent|hr|recruit/i.test(e.value));
-          resolve({ email: rhEmail?.value || emails[0]?.value || null, domain });
-        } catch(e) { resolve({ email: null, domain: null }); }
-      });
-    });
-    req.on('error', () => resolve({ email: null, domain: null }));
-    req.end();
-  });
+async function findEmailByName(entreprise, siteWeb) {
+  try {
+    const { execSync } = require('child_process');
+    let domain = '';
+    if(siteWeb) {
+      domain = siteWeb.replace(/https?:\/\//,'').replace(/\/.*/,'').replace(/^www\./,'');
+    } else {
+      domain = entreprise.toLowerCase().replace(/[^a-z0-9]/g,'').replace(/\s/g,'') + '.com';
+    }
+    const url = `https://api.hunter.io/v2/domain-search?domain=${domain}&api_key=${HUNTER_KEY}&limit=5`;
+    const result = execSync(`wget -qO- "${url}"`, {encoding:'utf8', timeout:15000});
+    const data = JSON.parse(result);
+    const emails = data.data?.emails || [];
+    const rhEmail = emails.find(e => /rh|recrutement|talent|hr|recruit|career/i.test(e.value));
+    return { email: rhEmail?.value || emails[0]?.value || null, domain: data.data?.domain || domain };
+  } catch(e) {
+    console.log('Hunter erreur:', e.message);
+    return { email: null, domain: null };
+  }
 }
 
 function callClaude(prompt, maxTokens) {
@@ -118,13 +117,33 @@ async function main() {
     try { const {execSync} = require('child_process'); cvText = execSync(`pdftotext "${cvPath}" -`,{encoding:'utf8',timeout:15000}); } catch(e) {}
   }
 
-  // Récupérer cibles à envoyer
-  const cibles = await pool.query(`
+  // Vérifier combien ont été envoyées cette semaine
+  const semaineCount = await pool.query(`
+    SELECT COUNT(*) as total FROM ja_cibles_spontanees
+    WHERE statut IN ('envoyée', 'relancée', 'entretien')
+    AND envoye_le >= NOW() - INTERVAL '7 days'
+  `);
+  const dejaSemaineCount = parseInt(semaineCount.rows[0].total);
+  const restant = 5 - dejaSemaineCount;
+  console.log(\`\${dejaSemaineCount} envoyées cette semaine, \${restant} restantes\`);
+
+  if(restant <= 0) {
+    console.log('Limite de 5 candidatures/semaine atteinte - arrêt');
+    await pool.end(); return;
+  }
+
+  // Récupérer cibles à envoyer - anti-doublon par entreprise
+  const cibles = await pool.query(\`
     SELECT * FROM ja_cibles_spontanees
     WHERE statut IN ('à envoyer', 'a envoyer')
+    AND entreprise NOT IN (
+      SELECT entreprise FROM ja_cibles_spontanees
+      WHERE statut IN ('envoyée', 'relancée', 'entretien')
+      AND envoye_le >= NOW() - INTERVAL '7 days'
+    )
     ORDER BY created_at ASC
-    LIMIT 3
-  `);
+    LIMIT \${restant}
+  \`);
 
   console.log(`${cibles.rows.length} cible(s) à traiter`);
   if(cibles.rows.length === 0) { await pool.end(); return; }
@@ -139,7 +158,7 @@ async function main() {
       let emailContact = c.email_contact;
       if(!emailContact) {
         console.log(`    Recherche email Hunter.io pour ${c.entreprise}...`);
-        const hunterResult = await findEmailByName(c.entreprise);
+        const hunterResult = await findEmailByName(c.entreprise, c.site_web);
         emailContact = hunterResult.email;
         if(emailContact) {
           await pool.query('UPDATE ja_cibles_spontanees SET email_contact=$1 WHERE id=$2', [emailContact, c.id]);

@@ -2607,7 +2607,12 @@ OFFRE VISEE:
 Titre: ${titre_offre || ''}
 Texte: ${(texte_offre||'').slice(0,2000)}
 
-Retourne UNIQUEMENT le texte de la lettre, sans en-tete ni metadonnees, pret a etre copie.`;
+Retourne UNIQUEMENT le texte de la lettre.
+REGLES ABSOLUES:
+- Commencer par "Madame, Monsieur,"
+- Terminer par "Cordialement," et le nom
+- AUCUNE date, AUCUN en-tete, AUCUNE adresse, AUCUN objet, AUCUN markdown
+- Texte brut uniquement`;
 
     const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
     const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:prompt}]});
@@ -2687,12 +2692,8 @@ app.post('/api/candidatures/envoyer-email', async (req, res) => {
     const nomCandidat = d.nom || 'Mohamed Assalia Maiga';
     const titrPoste = titre_offre || d.titre_accroche || 'le poste';
 
-    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:20px">
-<h2 style="color:#1e3a5f">Candidature — ${titrPoste}</h2>
-<p>Madame, Monsieur,</p>
-${lettre ? `<p style="white-space:pre-wrap;line-height:1.7">${lettre}</p>` : `<p>Veuillez trouver ci-joint mon CV pour le poste de <strong>${titrPoste}</strong>.</p><p>Je reste disponible pour un entretien à votre convenance.</p><p>Cordialement,<br><strong>${nomCandidat}</strong></p>`}
-<hr style="margin:20px 0;border:none;border-top:1px solid #e2e8f0"/>
-<p style="font-size:12px;color:#64748b">Candidature générée via JobAssistant IA</p>
+    const html = `<!DOCTYPE html><html><body style="font-family:Arial,sans-serif;padding:20px;max-width:650px;margin:0 auto">
+${lettre ? `<p style="white-space:pre-wrap;line-height:1.8;font-size:14px">${lettre}</p>` : `<p>Madame, Monsieur,</p><p>Veuillez trouver ci-joint mon CV pour le poste de <strong>${titrPoste}</strong>.</p><p>Cordialement,<br><strong>${nomCandidat}</strong></p>`}
 </body></html>`;
 
     await transporter.sendMail({
@@ -2942,7 +2943,8 @@ Le tableau experiences doit avoir EXACTEMENT ${experiencesBrutes.length} element
             const lettrePrompt = `Redige une lettre de motivation professionnelle (250-350 mots, francais), basee sur ce CV adapte et cette offre. Pas de generique, personnalisee.
 Candidat: ${cvData.nom}, ${cvData.titre_accroche}. Resume: ${cvData.resume}. Points cles: ${(cvData.points_cles_mis_en_avant||[]).join('. ')}
 Offre: ${job.title} chez ${job.company||'?'}. Texte: ${(job.description||'').slice(0,1500)}
-Retourne UNIQUEMENT le texte de la lettre.`;
+Retourne UNIQUEMENT le texte de la lettre.
+REGLES: commencer par Madame Monsieur, terminer par Cordialement + nom, AUCUNE date ni en-tete ni markdown.`;
             const lettre = await callClaude(lettrePrompt, 1000);
 
             await pool.query('INSERT INTO ja_candidatures_auto (job_id, verdict, score_match, cv_optimise_id, lettre, analyse_match) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (job_id) DO UPDATE SET verdict=$2, score_match=$3, cv_optimise_id=$4, lettre=$5, analyse_match=$6',

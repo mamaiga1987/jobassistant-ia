@@ -138,12 +138,12 @@ EXACTEMENT ${experiencesBrutes.length} experiences. UNIQUEMENT le JSON.`;
       const lettrePrompt = `Redige une lettre de motivation professionnelle (250-300 mots, français) pour ${job.title} chez ${job.company||'?'}.
 Candidat: ${cvData.nom}, ${cvData.titre_accroche}. Resume: ${cvData.resume}.
 Offre: ${(job.description||'').slice(0,1500)}
-REGLES IMPORTANTES:
-- Ne pas mettre de date, ni d'en-tete, ni de coordonnees - juste le corps de la lettre
-- Commencer directement par "Madame, Monsieur,"
-- Terminer par "Cordialement," suivi du nom
+REGLES ABSOLUES:
+- Commencer DIRECTEMENT par "Madame, Monsieur,"
+- Terminer par "Cordialement," suivi du nom complet
+- AUCUNE date, AUCUN en-tete, AUCUNE adresse, AUCUN objet
 - AUCUN markdown, AUCUN asterisque, AUCUN crochet
-- Texte brut uniquement
+- Texte brut uniquement, pret a etre envoye
 Retourne UNIQUEMENT le texte de la lettre.`;
       const lettre = await callClaude(lettrePrompt, 800);
 

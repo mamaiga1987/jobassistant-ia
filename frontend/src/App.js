@@ -2313,11 +2313,11 @@ const SpontaneesPage = () => {
                   </>
                 )}
                 <select value={c.statut} onChange={async e=>{await axios.put(API+'/spontanees/'+c.id,{...c,statut:e.target.value});charger();}} style={{...G.inp,padding:'4px 8px',fontSize:11,width:'auto'}}>
-                  <option value='a envoyer'>a envoyer</option>
-                  <option value='envoyee'>envoyee</option>
-                  <option value='relancee'>relancee</option>
-                  <option value='entretien'>entretien</option>
-                  <option value='refus'>refus</option>
+                  <option value="à envoyer">à envoyer</option>
+                  <option value="envoyée">envoyée</option>
+                  <option value="relancée">relancée</option>
+                  <option value="entretien">entretien</option>
+                  <option value="refus">refus</option>
                 </select>
                 <button onClick={()=>editer(c)} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'transparent',color:'#64748b',border:'1px solid #334155'}}>✏️ Éditer</button>
                 <button onClick={()=>supprimer(c.id)} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'rgba(239,68,68,0.1)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.2)'}}>🗑️</button>

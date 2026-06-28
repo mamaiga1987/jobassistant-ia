@@ -21,3 +21,4 @@
 20 18 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores-semantiques > /dev/null 2>&1
 45 18 * * * docker exec jobassistant-backend wget -qO- --post-data='' http://localhost:4003/api/recalcul-scores-combines > /dev/null 2>&1
 0 7 * * 1-5 docker exec jobassistant-backend node sender_email_auto.js >> /opt/jobassistant/collector.log 2>&1
+30 7 * * 1-5 docker exec jobassistant-backend node sender_spontanees.js >> /opt/jobassistant/collector.log 2>&1

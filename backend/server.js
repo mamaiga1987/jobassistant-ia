@@ -2713,6 +2713,214 @@ ${lettre ? `<p style="white-space:pre-wrap;line-height:1.8;font-size:14px">${let
   } catch(e) { res.status(500).json({error: e.message}); }
 });
 
+
+// ── CANDIDATURES SPONTANÉES ───────────────────────────────────────────────────
+app.get('/api/spontanees', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM ja_cibles_spontanees ORDER BY created_at DESC');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/spontanees', async (req, res) => {
+  try {
+    const { entreprise, secteur, email_contact, site_web, pourquoi } = req.body;
+    if(!entreprise) return res.status(400).json({ error: 'Entreprise requise' });
+    const r = await pool.query(
+      'INSERT INTO ja_cibles_spontanees (entreprise, secteur, email_contact, site_web, pourquoi) VALUES ($1,$2,$3,$4,$5) RETURNING *',
+      [entreprise, secteur||'', email_contact||'', site_web||'', pourquoi||'']
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/spontanees/:id', async (req, res) => {
+  try {
+    const { entreprise, secteur, email_contact, site_web, pourquoi, statut, notes, reponse } = req.body;
+    const r = await pool.query(
+      'UPDATE ja_cibles_spontanees SET entreprise=$1, secteur=$2, email_contact=$3, site_web=$4, pourquoi=$5, statut=$6, notes=$7, reponse=$8 WHERE id=$9 RETURNING *',
+      [entreprise, secteur||'', email_contact||'', site_web||'', pourquoi||'', statut||'à envoyer', notes||'', reponse||'', req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/spontanees/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ja_cibles_spontanees WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/spontanees/:id/envoyer', async (req, res) => {
+  try {
+    const cible = await pool.query('SELECT * FROM ja_cibles_spontanees WHERE id=$1', [req.params.id]);
+    if(cible.rows.length === 0) return res.status(404).json({ error: 'Cible non trouvée' });
+    const c = cible.rows[0];
+    if(!c.email_contact) return res.status(400).json({ error: 'Email de contact requis' });
+
+    res.json({ status: 'started', message: 'Génération et envoi en cours...' });
+
+    // Traitement asynchrone
+    (async () => {
+      const callClaude = (prompt, maxTokens) => new Promise((resolve) => {
+        const Anthropic_key = process.env.ANTHROPIC_API_KEY;
+        const https = require('https');
+        const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:maxTokens||1000,messages:[{role:'user',content:prompt}]});
+        const req = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':Anthropic_key,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text);}catch(e){resolve(null);}});});
+        req.on('error',()=>resolve(null));
+        req.write(body);req.end();
+      });
+      try {
+        const profil = await getProfil();
+        const { execSync } = require('child_process');
+        let cvText = '';
+        if(profil.cv_path) {
+          try { cvText = execSync(`pdftotext "${profil.cv_path}" -`, {encoding:'utf8', timeout:15000}); } catch(e) {}
+        }
+
+        // 1. Générer CV repositionné pour cette entreprise
+        const cvPrompt = `Reecris ce CV pour une candidature spontanee chez ${c.entreprise} (secteur: ${c.secteur||'non précisé'}).
+Raison du candidat: ${c.pourquoi||'Intérêt pour cette entreprise'}.
+CV original: ${cvText.slice(0,10000)}
+Repositionne les experiences et competences pour correspondre au secteur ${c.secteur||'Data/IA'}.
+Retourne JSON: {"nom":"...","titre_accroche":"...","resume":"...","competences_ordonnees":[...],"experiences":[{"titre":"...","periode":"...","entreprise":"...","description":"..."}],"certifications":[...],"formation":"...","points_cles_mis_en_avant":[...]}
+UNIQUEMENT le JSON.`;
+
+        const cvResult = await callClaude(cvPrompt, 4000);
+        const cvData = JSON.parse((cvResult||'{}').replace(/```json|```/g,'').trim());
+
+        // Sauvegarder le CV
+        const savedCv = await pool.query(
+          'INSERT INTO ja_cv_optimises (job_id, data, status, offre_titre) VALUES ($1,$2,$3,$4) RETURNING id',
+          [null, JSON.stringify(cvData), 'done', 'Candidature spontanée — '+c.entreprise]
+        );
+        const cvOptimiseId = savedCv.rows[0].id;
+
+        // 2. Générer lettre spontanée
+        const lettrePrompt = `Redige une lettre de candidature spontanee professionnelle (250-300 mots, français) pour ${c.entreprise} (secteur: ${c.secteur||'Data/IA'}).
+Candidat: ${cvData.nom}, ${cvData.titre_accroche}.
+Resume: ${cvData.resume}
+Raison de cibler cette entreprise: ${c.pourquoi||'Forte attractivité et culture data'}
+Points cles: ${(cvData.points_cles_mis_en_avant||[]).join('. ')}
+REGLES ABSOLUES:
+- Commencer par "Madame, Monsieur,"
+- Mentionner explicitement ${c.entreprise} et pourquoi cette entreprise specifiquement
+- Terminer par "Cordialement," suivi du nom
+- AUCUNE date, AUCUN en-tete, AUCUN markdown
+- Texte brut uniquement`;
+
+        const lettre = await callClaude(lettrePrompt, 800);
+        const lettreClean = (lettre||'')
+          .replace(/\*\*(.*?)\*\*/g,'$1')
+          .replace(/\*(.*?)\*/g,'$1')
+          .replace(/\[.*?\]/g,'')
+          .replace(/^Paris.*\d{4}\s*/m,'')
+          .trim();
+
+        // 3. Générer PDF
+        const PDFDocument = require('pdfkit');
+        const d = cvData;
+        const doc = new PDFDocument({margin:50, size:'A4'});
+        const chunks = [];
+        doc.on('data', chunk => chunks.push(chunk));
+        const pdfReady = new Promise(resolve => doc.on('end', resolve));
+        doc.fontSize(22).fillColor('#1e3a5f').text(d.nom||'Mohamed Assalia Maiga', {align:'center'});
+        doc.fontSize(13).fillColor('#2d6a9f').text(d.titre_accroche||'');
+        doc.fontSize(10).fillColor('#64748b').text('Longjumeau (91) · +33 778 501 767 · mmohamedassalia6@gmail.com · Disponible immédiatement');
+        doc.moveDown(0.5);
+        doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('PROFIL');
+        doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f'); doc.moveDown(0.2);
+        doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.resume||'', {align:'justify'});
+        doc.moveDown(0.5);
+        if((d.competences_ordonnees||[]).length>0) {
+          doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('COMPÉTENCES');
+          doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f'); doc.moveDown(0.2);
+          doc.fontSize(10).fillColor('#333').font('Helvetica').text((d.competences_ordonnees||[]).join(', '), {align:'justify'});
+          doc.moveDown(0.5);
+        }
+        doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('EXPÉRIENCES');
+        doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f'); doc.moveDown(0.2);
+        (d.experiences||[]).forEach(e => {
+          doc.fontSize(10).fillColor('#1e3a5f').font('Helvetica-Bold').text((e.titre||'')+(e.entreprise?' — '+e.entreprise:''));
+          doc.fontSize(9).fillColor('#64748b').font('Helvetica').text(e.periode||'');
+          doc.fontSize(10).fillColor('#333').font('Helvetica').text((e.description||'').replace(/[●%Ï]/g,'-').replace(/�+/g,''), {align:'justify'});
+          doc.moveDown(0.3);
+        });
+        if(d.formation) {
+          doc.fontSize(12).fillColor('#1e3a5f').font('Helvetica-Bold').text('FORMATION');
+          doc.moveTo(50,doc.y).lineTo(545,doc.y).stroke('#1e3a5f'); doc.moveDown(0.2);
+          doc.fontSize(10).fillColor('#333').font('Helvetica').text(d.formation, {align:'justify'});
+        }
+        doc.end();
+        await pdfReady;
+        const pdfBuffer = Buffer.concat(chunks);
+
+        // 4. Envoyer email
+        const nodemailer = require('nodemailer');
+        const transporter = nodemailer.createTransport({service:'gmail', auth:{user:'mmohamedassalia6@gmail.com', pass:process.env.GMAIL_PASS||''}});
+        const html = `<p style="white-space:pre-wrap;line-height:1.8;font-family:Arial,sans-serif;font-size:14px">${lettreClean}</p>`;
+
+        await transporter.sendMail({
+          from: `${d.nom||'Mohamed Assalia Maiga'} <mmohamedassalia6@gmail.com>`,
+          to: c.email_contact,
+          cc: 'mmohamedassalia6@gmail.com',
+          subject: `Candidature spontanée — ${cvData.titre_accroche||'Product Owner Data'} — ${d.nom||'Mohamed Assalia Maiga'}`,
+          html,
+          attachments: [{
+            filename: `CV_${(d.nom||'Mohamed').replace(/\s/g,'_')}_${c.entreprise.replace(/[^a-zA-Z0-9]/g,'_').slice(0,30)}.pdf`,
+            content: pdfBuffer,
+            contentType: 'application/pdf'
+          }]
+        });
+
+        // 5. Mettre à jour le statut
+        await pool.query(
+          'UPDATE ja_cibles_spontanees SET statut=$1, envoye_le=$2, cv_optimise_id=$3 WHERE id=$4',
+          ['envoyée', new Date(), cvOptimiseId, c.id]
+        );
+
+        console.log(`✅ Candidature spontanée envoyée à ${c.email_contact} (${c.entreprise})`);
+      } catch(e) {
+        console.log(`❌ Erreur candidature spontanée:`, e.message);
+        await pool.query('UPDATE ja_cibles_spontanees SET statut=$1 WHERE id=$2', ['erreur', c.id]);
+      }
+    })();
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/spontanees/:id/relancer', async (req, res) => {
+  try {
+    const cible = await pool.query('SELECT * FROM ja_cibles_spontanees WHERE id=$1', [req.params.id]);
+    if(cible.rows.length === 0) return res.status(404).json({ error: 'Cible non trouvée' });
+    const c = cible.rows[0];
+    if(!c.email_contact) return res.status(400).json({ error: 'Email requis' });
+
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({service:'gmail', auth:{user:'mmohamedassalia6@gmail.com', pass:process.env.GMAIL_PASS||''}});
+
+    const relanceHtml = `<p style="font-family:Arial,sans-serif;font-size:14px;line-height:1.8">Madame, Monsieur,<br><br>
+Je me permets de revenir vers vous suite à ma candidature spontanée envoyée le ${new Date(c.envoye_le).toLocaleDateString('fr-FR')}.<br><br>
+Je reste très intéressé par ${c.entreprise} et les opportunités dans le domaine ${c.secteur||'Data & IA'}. Mon profil de Product Owner Data avec 9 ans d'expérience dans les télécommunications pourrait apporter une réelle valeur à vos équipes.<br><br>
+Je reste à votre disposition pour un échange.<br><br>
+Cordialement,<br>
+Mohamed Assalia Maiga</p>`;
+
+    await transporter.sendMail({
+      from: 'Mohamed Assalia Maiga <mmohamedassalia6@gmail.com>',
+      to: c.email_contact,
+      cc: 'mmohamedassalia6@gmail.com',
+      subject: `Relance — Candidature spontanée — ${c.entreprise}`,
+      html: relanceHtml
+    });
+
+    await pool.query(
+      'UPDATE ja_cibles_spontanees SET statut=$1, relance_le=$2 WHERE id=$3',
+      ['relancée', new Date(), c.id]
+    );
+    res.json({ success: true, message: 'Relance envoyée' });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 // ── GESTION DES CRONS ─────────────────────────────────────────────────────────
 const { exec: execCron } = require('child_process');
 

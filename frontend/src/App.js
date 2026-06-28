@@ -48,6 +48,7 @@ const navItems = [
   {id:'formations',icon:<Star size={18}/>,label:'Formations recommandees'},
   {id:'veille-comp',icon:<Search size={18}/>,label:'Veille competences'},
   {id:'crons',icon:<Settings size={18}/>,label:'Paramètres Crons'},
+  {id:'spontanees',icon:<Send size={18}/>,label:'Candidatures spontanées'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -2165,7 +2166,169 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences','crons':'Paramètres Crons'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences','crons':'Paramètres Crons','spontanees':'Candidatures Spontanées'};
+
+
+const STATUT_COLORS = {
+  'à envoyer': '#64748b',
+  'envoyée': '#3b82f6',
+  'relancée': '#f59e0b',
+  'entretien': '#10b981',
+  'refus': '#ef4444',
+  'erreur': '#ef4444',
+};
+
+const SpontaneesPage = () => {
+  const [cibles, setCibles] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [showForm, setShowForm] = React.useState(false);
+  const [sending, setSending] = React.useState({});
+  const [form, setForm] = React.useState({entreprise:'',secteur:'',email_contact:'',site_web:'',pourquoi:''});
+  const [editId, setEditId] = React.useState(null);
+
+  const charger = async () => {
+    setLoading(true);
+    try { const r = await axios.get(API+'/spontanees'); setCibles(r.data); } catch(e) {}
+    setLoading(false);
+  };
+
+  React.useEffect(()=>{ charger(); },[]);
+
+  const sauvegarder = async () => {
+    if(!form.entreprise) { alert('Entreprise requise'); return; }
+    try {
+      if(editId) {
+        await axios.put(API+'/spontanees/'+editId, form);
+      } else {
+        await axios.post(API+'/spontanees', form);
+      }
+      setForm({entreprise:'',secteur:'',email_contact:'',site_web:'',pourquoi:''});
+      setShowForm(false);
+      setEditId(null);
+      charger();
+    } catch(e) { alert('Erreur: '+e.message); }
+  };
+
+  const envoyer = async (id, entreprise) => {
+    if(!window.confirm('Générer et envoyer la candidature spontanée à '+entreprise+' ?')) return;
+    setSending(s=>({...s,[id]:true}));
+    try {
+      await axios.post(API+'/spontanees/'+id+'/envoyer');
+      alert('Génération et envoi démarrés — vous recevrez une copie par email dans 2-3 minutes');
+      setTimeout(charger, 30000);
+    } catch(e) { alert('Erreur: '+e.message); }
+    setSending(s=>({...s,[id]:false}));
+  };
+
+  const relancer = async (id, entreprise) => {
+    if(!window.confirm('Envoyer une relance à '+entreprise+' ?')) return;
+    try {
+      await axios.post(API+'/spontanees/'+id+'/relancer');
+      alert('Relance envoyée !');
+      charger();
+    } catch(e) { alert('Erreur: '+e.message); }
+  };
+
+  const supprimer = async (id) => {
+    if(!window.confirm('Supprimer cette cible ?')) return;
+    await axios.delete(API+'/spontanees/'+id);
+    charger();
+  };
+
+  const editer = (c) => {
+    setForm({entreprise:c.entreprise,secteur:c.secteur||'',email_contact:c.email_contact||'',site_web:c.site_web||'',pourquoi:c.pourquoi||''});
+    setEditId(c.id);
+    setShowForm(true);
+  };
+
+  const SECTEURS = ['Data & IA','Télécom','Fintech','Santé','E-commerce','ESN/Conseil','Médias','Energie','Transport','Autre'];
+
+  return (
+    <div>
+      <div style={{...G.card,marginBottom:16,background:'rgba(16,185,129,0.06)',border:'1px solid rgba(16,185,129,0.2)'}}>
+        <div style={{fontSize:13,fontWeight:700,color:'#10b981',marginBottom:4}}>📨 Candidatures Spontanées</div>
+        <div style={{fontSize:11,color:'#94a3b8'}}>Ciblez des entreprises qui vous intéressent même sans offre publiée. CV repositionné + lettre personnalisée générés automatiquement.</div>
+      </div>
+
+      <button onClick={()=>{setShowForm(!showForm);setEditId(null);setForm({entreprise:'',secteur:'',email_contact:'',site_web:'',pourquoi:''}); }} style={{...G.btn,width:'100%',marginBottom:12,background:'rgba(16,185,129,0.2)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>
+        {showForm?'✕ Annuler':'+ Ajouter une entreprise cible'}
+      </button>
+
+      {showForm && (
+        <div style={{...G.card,marginBottom:16,border:'1px solid rgba(16,185,129,0.3)'}}>
+          <div style={{fontSize:13,fontWeight:700,color:'#10b981',marginBottom:12}}>{editId?'Modifier':'Nouvelle cible'}</div>
+          <input value={form.entreprise} onChange={e=>setForm(f=>({...f,entreprise:e.target.value}))} placeholder="Nom de l'entreprise *" style={{...G.inp,marginBottom:8}}/>
+          <select value={form.secteur} onChange={e=>setForm(f=>({...f,secteur:e.target.value}))} style={{...G.inp,marginBottom:8}}>
+            <option value="">Secteur...</option>
+            {SECTEURS.map(s=><option key={s} value={s}>{s}</option>)}
+          </select>
+          <input value={form.email_contact} onChange={e=>setForm(f=>({...f,email_contact:e.target.value}))} placeholder="Email RH / Manager (optionnel)" type="email" style={{...G.inp,marginBottom:8}}/>
+          <input value={form.site_web} onChange={e=>setForm(f=>({...f,site_web:e.target.value}))} placeholder="Site web (optionnel)" style={{...G.inp,marginBottom:8}}/>
+          <textarea value={form.pourquoi} onChange={e=>setForm(f=>({...f,pourquoi:e.target.value}))} placeholder="Pourquoi cette entreprise vous intéresse ? (aide à personnaliser la lettre)" style={{...G.inp,height:80,resize:'vertical',marginBottom:12}}/>
+          <button onClick={sauvegarder} style={{...G.btn,width:'100%',background:'rgba(16,185,129,0.3)',color:'#10b981',border:'1px solid rgba(16,185,129,0.4)'}}>
+            {editId?'💾 Sauvegarder les modifications':'✅ Ajouter à ma liste'}
+          </button>
+        </div>
+      )}
+
+      {loading ? <div style={{textAlign:'center',padding:40,color:'#94a3b8'}}>Chargement...</div> : (
+        <>
+          <div style={{fontSize:12,color:'#64748b',marginBottom:8}}>{cibles.length} entreprise(s) ciblée(s)</div>
+          {cibles.length === 0 && (
+            <div style={{...G.card,textAlign:'center',padding:32,color:'#64748b'}}>
+              Aucune cible pour l'instant.<br/>Ajoutez des entreprises qui vous intéressent !
+            </div>
+          )}
+          {cibles.map(c=>(
+            <div key={c.id} style={{...G.card,marginBottom:10,borderLeft:'3px solid '+(STATUT_COLORS[c.statut]||'#64748b')}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:700,color:'#e2e8f0'}}>{c.entreprise}</div>
+                  <div style={{fontSize:11,color:'#64748b',marginTop:2}}>
+                    {c.secteur&&<span style={{marginRight:8}}>🏢 {c.secteur}</span>}
+                    {c.email_contact&&<span style={{marginRight:8}}>📧 {c.email_contact}</span>}
+                    {c.envoye_le&&<span>Envoyée le {new Date(c.envoye_le).toLocaleDateString('fr-FR')}</span>}
+                  </div>
+                  {c.pourquoi&&<div style={{fontSize:11,color:'#94a3b8',marginTop:4,fontStyle:'italic'}}>"{c.pourquoi.slice(0,80)}{c.pourquoi.length>80?'...':''}"</div>}
+                </div>
+                <span style={{background:STATUT_COLORS[c.statut]+'22',color:STATUT_COLORS[c.statut],border:'1px solid '+STATUT_COLORS[c.statut]+'44',borderRadius:6,padding:'2px 8px',fontSize:11,fontWeight:600,whiteSpace:'nowrap',marginLeft:8}}>
+                  {c.statut}
+                </span>
+              </div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                {c.email_contact && c.statut==='à envoyer' && (
+                  <button onClick={()=>envoyer(c.id,c.entreprise)} disabled={sending[c.id]} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'rgba(16,185,129,0.2)',color:'#10b981',border:'1px solid rgba(16,185,129,0.3)'}}>
+                    {sending[c.id]?'Génération...':'📨 Générer & Envoyer'}
+                  </button>
+                )}
+                {c.statut==='envoyée' && (
+                  <button onClick={()=>relancer(c.id,c.entreprise)} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'rgba(245,158,11,0.2)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.3)'}}>
+                    🔔 Relancer
+                  </button>
+                )}
+                {c.cv_optimise_id && (
+                  <>
+                    <button onClick={()=>window.open(API+'/cv-optimise/'+c.cv_optimise_id+'/pdf','_blank')} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'rgba(139,92,246,0.2)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)'}}>📥 CV PDF</button>
+                    <button onClick={()=>window.open(API+'/cv-optimise/'+c.cv_optimise_id+'/docx','_blank')} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'rgba(59,130,246,0.2)',color:'#60a5fa',border:'1px solid rgba(59,130,246,0.3)'}}>📥 Word</button>
+                  </>
+                )}
+                <select value={c.statut} onChange={async e=>{await axios.put(API+'/spontanees/'+c.id,{...c,statut:e.target.value});charger();}} style={{...G.inp,padding:'4px 8px',fontSize:11,width:'auto'}}>
+                  <option value='a envoyer'>a envoyer</option>
+                  <option value='envoyee'>envoyee</option>
+                  <option value='relancee'>relancee</option>
+                  <option value='entretien'>entretien</option>
+                  <option value='refus'>refus</option>
+                </select>
+                <button onClick={()=>editer(c)} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'transparent',color:'#64748b',border:'1px solid #334155'}}>✏️ Éditer</button>
+                <button onClick={()=>supprimer(c.id)} style={{...G.btn,padding:'5px 12px',fontSize:11,background:'rgba(239,68,68,0.1)',color:'#ef4444',border:'1px solid rgba(239,68,68,0.2)'}}>🗑️</button>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+};
 
 const CronsPage = () => {
   const [crons, setCrons] = React.useState([]);
@@ -2258,6 +2421,7 @@ const CronsPage = () => {
       case 'formations': return <FormationsPage key={Date.now()}/>;
       case 'veille-comp': return <VeilleCompetencesPage key={Date.now()}/>
       case 'crons': return <CronsPage/>;
+      case 'spontanees': return <SpontaneesPage/>;
       default: return null;
     }
   };

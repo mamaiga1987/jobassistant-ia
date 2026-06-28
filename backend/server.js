@@ -2747,6 +2747,31 @@ app.get('/api/crons', async (req, res) => {
       return { ...c, actif, desactive };
     });
     
+    // Ajouter les crons inconnus du fichier non couverts par CRONS_CONFIG
+    const fs2 = require('fs');
+    const crontabRaw2 = fs2.existsSync('/app/crontab_host.txt') ? fs2.readFileSync('/app/crontab_host.txt','utf8') : '';
+    crontabRaw2.split('\n').forEach((line, idx) => {
+      if(!line.trim() || line.startsWith('##')) return;
+      const raw = line.startsWith('#DISABLED#') ? line.replace('#DISABLED#','').trim() : line;
+      if(raw.startsWith('#')) return;
+      const parts = raw.trim().split(/\s+/);
+      if(parts.length < 6) return;
+      const cmd = parts[0]==='@reboot' ? parts.slice(1).join(' ') : parts.slice(5).join(' ');
+      const deja_couvert = CRONS_CONFIG.some(c => cmd.includes(c.cmd));
+      if(!deja_couvert) {
+        result.push({
+          id: 'custom_'+idx,
+          label: cmd.replace(/.*node |.*wget.*api\//,'').replace(/ .*/,'').slice(0,50),
+          categorie: 'Autres',
+          schedule: parts[0]==='@reboot' ? '@reboot' : parts.slice(0,5).join(' '),
+          heure_fr: 'Personnalisé',
+          cmd,
+          actif: !line.startsWith('#DISABLED#'),
+          desactive: line.startsWith('#DISABLED#')
+        });
+      }
+    });
+
     res.json(result);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
@@ -2775,10 +2800,9 @@ app.post('/api/crons/:id/toggle', async (req, res) => {
       res.json({ status: 'desactive', message: `${cron.label} désactivé` });
     }
     
-    const newCrontab = lines.filter(l => l !== undefined).join('\n');
-    const tmpFile = '/tmp/crontab_tmp';
-    require('fs').writeFileSync(tmpFile, newCrontab);
-    require('child_process').execSync(`crontab ${tmpFile}`);
+    const newCrontab = lines.join('\n');
+    // Ecrire dans le fichier partage avec l'hote
+    require('fs').writeFileSync('/app/crontab_host.txt', newCrontab);
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
 

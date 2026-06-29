@@ -124,7 +124,7 @@ async function main() {
     AND envoye_le >= NOW() - INTERVAL '7 days'
   `);
   const dejaSemaineCount = parseInt(semaineCount.rows[0].total);
-  const restant = 10 - dejaSemaineCount;
+  const restant = 50 - dejaSemaineCount;
   console.log(dejaSemaineCount + " envoyées cette semaine, " + restant + " restantes");
 
   if(restant <= 0) {

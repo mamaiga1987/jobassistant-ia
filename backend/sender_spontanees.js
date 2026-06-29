@@ -124,11 +124,11 @@ async function main() {
     AND envoye_le >= NOW() - INTERVAL '7 days'
   `);
   const dejaSemaineCount = parseInt(semaineCount.rows[0].total);
-  const restant = 5 - dejaSemaineCount;
+  const restant = 10 - dejaSemaineCount;
   console.log(dejaSemaineCount + " envoyées cette semaine, " + restant + " restantes");
 
   if(restant <= 0) {
-    console.log('Limite de 5 candidatures/semaine atteinte - arrêt');
+    console.log('Limite de 10 candidatures/semaine atteinte - arret');
     await pool.end(); return;
   }
 

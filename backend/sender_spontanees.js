@@ -125,7 +125,7 @@ async function main() {
   `);
   const dejaSemaineCount = parseInt(semaineCount.rows[0].total);
   const restant = 5 - dejaSemaineCount;
-  console.log(\`\${dejaSemaineCount} envoyées cette semaine, \${restant} restantes\`);
+  console.log(dejaSemaineCount + " envoyées cette semaine, " + restant + " restantes");
 
   if(restant <= 0) {
     console.log('Limite de 5 candidatures/semaine atteinte - arrêt');
@@ -133,7 +133,7 @@ async function main() {
   }
 
   // Récupérer cibles à envoyer - anti-doublon par entreprise
-  const cibles = await pool.query(\`
+  const cibles = await pool.query(`
     SELECT * FROM ja_cibles_spontanees
     WHERE statut IN ('à envoyer', 'a envoyer')
     AND entreprise NOT IN (
@@ -142,8 +142,8 @@ async function main() {
       AND envoye_le >= NOW() - INTERVAL '7 days'
     )
     ORDER BY created_at ASC
-    LIMIT \${restant}
-  \`);
+    LIMIT ${restant}
+  `);
 
   console.log(`${cibles.rows.length} cible(s) à traiter`);
   if(cibles.rows.length === 0) { await pool.end(); return; }

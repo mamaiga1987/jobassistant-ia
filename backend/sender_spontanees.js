@@ -136,11 +136,7 @@ async function main() {
   const cibles = await pool.query(`
     SELECT * FROM ja_cibles_spontanees
     WHERE statut IN ('à envoyer', 'a envoyer')
-    AND entreprise NOT IN (
-      SELECT entreprise FROM ja_cibles_spontanees
-      WHERE statut IN ('envoyée', 'relancée', 'entretien')
-      AND envoye_le >= NOW() - INTERVAL '7 days'
-    )
+    AND envoye_le IS NULL
     ORDER BY created_at ASC
     LIMIT ${restant}
   `);

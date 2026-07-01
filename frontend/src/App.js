@@ -49,6 +49,7 @@ const navItems = [
   {id:'veille-comp',icon:<Search size={18}/>,label:'Veille competences'},
   {id:'crons',icon:<Settings size={18}/>,label:'Paramètres Crons'},
   {id:'spontanees',icon:<Send size={18}/>,label:'Candidatures spontanées'},
+  {id:'prompts',icon:<Settings size={18}/>,label:'Prompt Manager'},
 ];
 
 const Sidebar = ({ active, setActive, isMobile, open, setOpen, profil }) => (
@@ -2166,7 +2167,7 @@ export default function App() {
       alert('Candidature enregistree pour: '+job.title);
     } catch(e){ alert('Erreur: '+e.message); }
   };
-  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences','crons':'Paramètres Crons','spontanees':'Candidatures Spontanées'};
+  const pageTitle = {dashboard:'Tableau de bord',offres:'Offres matchees',candidatures:'Candidatures',favoris:'Favoris',cv:'Mon CV & Profil',alertes:'Alertes',parametres:'Parametres',historique:'Historique rapports',tendances:'Tendances marche',portfolio:'Portfolio projets',agenda:'Agenda recherche',blacklist:'Blacklist entreprises',metiers:'Mes metiers cibles',stats:'Statistiques avancees','offre-libre':'Coller une offre',questions:'Banque de questions',formations:'Formations recommandees','veille-comp':'Veille competences','crons':'Paramètres Crons','spontanees':'Candidatures Spontanées','prompts':'Prompt Manager'};
 
 
 const STATUT_COLORS = {
@@ -2176,6 +2177,195 @@ const STATUT_COLORS = {
   'entretien': '#10b981',
   'refus': '#ef4444',
   'erreur': '#ef4444',
+};
+
+
+const CAT_COLORS = {
+  'Scoring & Matching': '#f59e0b',
+  'CV & Documents': '#8b5cf6',
+  'Lettres & Emails': '#10b981',
+  'Analyse': '#3b82f6',
+  'Autre': '#64748b',
+};
+
+const PromptManagerPage = () => {
+  const [prompts, setPrompts] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [selected, setSelected] = React.useState(null);
+  const [editing, setEditing] = React.useState(false);
+  const [showNew, setShowNew] = React.useState(false);
+  const [testing, setTesting] = React.useState(false);
+  const [testResult, setTestResult] = React.useState('');
+  const [saving, setSaving] = React.useState(false);
+  const [catFilter, setCatFilter] = React.useState('tous');
+  const [form, setForm] = React.useState({nom:'',categorie:'Scoring & Matching',description:'',prompt_text:'',variables:''});
+
+  const charger = async () => {
+    setLoading(true);
+    try { const r = await axios.get(API+'/prompts'); setPrompts(r.data); } catch(e) {}
+    setLoading(false);
+  };
+
+  React.useEffect(()=>{ charger(); },[]);
+
+  const categories = ['tous',...new Set(prompts.map(p=>p.categorie))];
+  const filtered = catFilter==='tous' ? prompts : prompts.filter(p=>p.categorie===catFilter);
+
+  const sauvegarder = async () => {
+    if(!selected) return;
+    setSaving(true);
+    try {
+      await axios.put(API+'/prompts/'+selected.id, selected);
+      setEditing(false);
+      charger();
+      alert('Prompt sauvegardé !');
+    } catch(e) { alert('Erreur: '+e.message); }
+    setSaving(false);
+  };
+
+  const creer = async () => {
+    try {
+      await axios.post(API+'/prompts', {...form, variables: form.variables.split(',').map(v=>v.trim()).filter(Boolean)});
+      setShowNew(false);
+      setForm({nom:'',categorie:'Scoring & Matching',description:'',prompt_text:'',variables:''});
+      charger();
+    } catch(e) { alert('Erreur: '+e.message); }
+  };
+
+  const supprimer = async (id) => {
+    if(!window.confirm('Supprimer ce prompt ?')) return;
+    await axios.delete(API+'/prompts/'+id);
+    setSelected(null);
+    charger();
+  };
+
+  const reset = async (id) => {
+    if(!window.confirm('Remettre le prompt original ?')) return;
+    const r = await axios.post(API+'/prompts/'+id+'/reset');
+    setSelected(r.data);
+    charger();
+  };
+
+  const tester = async () => {
+    if(!selected) return;
+    setTesting(true);
+    setTestResult('');
+    try {
+      const r = await axios.post(API+'/prompts/'+selected.id+'/tester', {}, {timeout:30000});
+      setTestResult(r.data.result);
+    } catch(e) { setTestResult('Erreur: '+e.message); }
+    setTesting(false);
+  };
+
+  const CATS = ['Scoring & Matching','CV & Documents','Lettres & Emails','Analyse','Autre'];
+
+  const [showDetail, setShowDetail] = React.useState(false);
+  const isMobile = window.innerWidth < 768;
+
+  return (
+    <div style={{display:'flex',gap:12,flexDirection:isMobile?'column':'row'}}>
+      {/* Panneau gauche - liste */}
+      <div style={{width:isMobile?'100%':280,flexShrink:0,display:isMobile&&showDetail?'none':'block'}}>
+        <div style={{...G.card,marginBottom:8,background:'rgba(245,158,11,0.06)',border:'1px solid rgba(245,158,11,0.2)'}}>
+          <div style={{fontSize:12,fontWeight:700,color:'#f59e0b',marginBottom:6}}>🧠 Prompt Manager</div>
+          <div style={{fontSize:10,color:'#94a3b8'}}>{prompts.length} prompts · Gérez tous les prompts IA du projet</div>
+        </div>
+
+        <select value={catFilter} onChange={e=>setCatFilter(e.target.value)} style={{...G.inp,fontSize:11,marginBottom:8,padding:'4px 8px'}}>
+          {categories.map(c=><option key={c} value={c}>{c==='tous'?'Toutes catégories':c}</option>)}
+        </select>
+
+        <button onClick={()=>setShowNew(!showNew)} style={{...G.btn,width:'100%',marginBottom:8,fontSize:11,background:'rgba(245,158,11,0.2)',color:'#f59e0b',border:'1px solid rgba(245,158,11,0.3)'}}>
+          + Nouveau prompt
+        </button>
+
+        {showNew && (
+          <div style={{...G.card,marginBottom:8,padding:10,border:'1px solid rgba(245,158,11,0.3)'}}>
+            <input value={form.nom} onChange={e=>setForm(f=>({...f,nom:e.target.value}))} placeholder="Nom du prompt *" style={{...G.inp,fontSize:11,marginBottom:6}}/>
+            <select value={form.categorie} onChange={e=>setForm(f=>({...f,categorie:e.target.value}))} style={{...G.inp,fontSize:11,marginBottom:6}}>
+              {CATS.map(c=><option key={c} value={c}>{c}</option>)}
+            </select>
+            <input value={form.description} onChange={e=>setForm(f=>({...f,description:e.target.value}))} placeholder="Description" style={{...G.inp,fontSize:11,marginBottom:6}}/>
+            <input value={form.variables} onChange={e=>setForm(f=>({...f,variables:e.target.value}))} placeholder="Variables: var1, var2..." style={{...G.inp,fontSize:11,marginBottom:6}}/>
+            <textarea value={form.prompt_text} onChange={e=>setForm(f=>({...f,prompt_text:e.target.value}))} placeholder="Texte du prompt..." style={{...G.inp,fontSize:11,height:80,resize:'vertical',marginBottom:6}}/>
+            <button onClick={creer} style={{...G.btn,width:'100%',fontSize:11,background:'rgba(245,158,11,0.3)',color:'#f59e0b'}}>Créer</button>
+          </div>
+        )}
+
+        {loading ? <div style={{color:'#94a3b8',fontSize:11,padding:8}}>Chargement...</div> : (
+          filtered.map(p=>(
+            <div key={p.id} onClick={()=>{setSelected(p);setEditing(false);setTestResult('');if(isMobile)setShowDetail(true);}}
+              style={{...G.card,marginBottom:6,padding:10,cursor:'pointer',borderLeft:'3px solid '+(CAT_COLORS[p.categorie]||'#64748b'),background:selected?.id===p.id?'rgba(245,158,11,0.08)':'',opacity:p.actif?1:0.5}}>
+              <div style={{fontSize:12,fontWeight:600,color:'#e2e8f0',marginBottom:2}}>{p.nom}</div>
+              <div style={{fontSize:10,color:CAT_COLORS[p.categorie]||'#64748b'}}>{p.categorie}</div>
+              {p.version > 1 && <div style={{fontSize:9,color:'#f59e0b'}}>v{p.version} modifié</div>}
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Panneau droit - détail */}
+      <div style={{flex:1,overflowY:'auto',display:isMobile&&!showDetail?'none':'block'}}>
+        {isMobile && showDetail && (
+          <button onClick={()=>{setShowDetail(false);}} style={{...G.btn,marginBottom:8,padding:'6px 12px',fontSize:11,background:'rgba(100,116,139,0.2)',color:'#94a3b8'}}>← Retour à la liste</button>
+        )}
+        {!selected ? (
+          <div style={{...G.card,textAlign:'center',padding:40,color:'#64748b'}}>
+            Sélectionnez un prompt pour le voir et l éditer
+          </div>
+        ) : (
+          <div style={{...G.card}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:12}}>
+              <div>
+                <div style={{fontSize:16,fontWeight:700,color:'#e2e8f0',marginBottom:4}}>{selected.nom}</div>
+                <div style={{fontSize:12,color:CAT_COLORS[selected.categorie]||'#64748b',marginBottom:4}}>{selected.categorie}</div>
+                <div style={{fontSize:11,color:'#94a3b8'}}>{selected.description}</div>
+              </div>
+              <div style={{display:'flex',gap:6,flexWrap:'wrap',justifyContent:'flex-end'}}>
+                <button onClick={()=>setEditing(!editing)} style={{...G.btn,padding:'4px 10px',fontSize:11,background:editing?'rgba(245,158,11,0.3)':'rgba(59,130,246,0.2)',color:editing?'#f59e0b':'#60a5fa'}}>
+                  {editing?'Annuler':'✏️ Éditer'}
+                </button>
+                {editing && <button onClick={sauvegarder} disabled={saving} style={{...G.btn,padding:'4px 10px',fontSize:11,background:'rgba(34,197,94,0.2)',color:'#22c55e'}}>{saving?'...':'💾 Sauvegarder'}</button>}
+                <button onClick={tester} disabled={testing} style={{...G.btn,padding:'4px 10px',fontSize:11,background:'rgba(168,85,247,0.2)',color:'#c084fc'}}>{testing?'Test...':'▶ Tester'}</button>
+                {selected.version > 1 && <button onClick={()=>reset(selected.id)} style={{...G.btn,padding:'4px 10px',fontSize:11,background:'rgba(245,158,11,0.2)',color:'#f59e0b'}}>↺ Reset</button>}
+                <button onClick={()=>supprimer(selected.id)} style={{...G.btn,padding:'4px 10px',fontSize:11,background:'rgba(239,68,68,0.1)',color:'#ef4444'}}>🗑️</button>
+              </div>
+            </div>
+
+            {selected.variables && selected.variables.length > 0 && (
+              <div style={{marginBottom:10}}>
+                <div style={{fontSize:11,color:'#64748b',marginBottom:4}}>Variables utilisées :</div>
+                <div style={{display:'flex',gap:4,flexWrap:'wrap'}}>
+                  {selected.variables.map((v,i)=>(
+                    <span key={i} style={{background:'rgba(139,92,246,0.15)',color:'#a78bfa',border:'1px solid rgba(139,92,246,0.3)',borderRadius:4,padding:'2px 6px',fontSize:10,fontFamily:'monospace'}}>{v}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{fontSize:11,color:'#64748b',marginBottom:4}}>Texte du prompt :</div>
+            {editing ? (
+              <textarea value={selected.prompt_text} onChange={e=>setSelected(s=>({...s,prompt_text:e.target.value}))}
+                style={{...G.inp,width:'100%',height:300,resize:'vertical',fontSize:12,fontFamily:'monospace',lineHeight:1.6,boxSizing:'border-box'}}/>
+            ) : (
+              <div style={{background:'rgba(0,0,0,0.2)',borderRadius:8,padding:12,fontSize:12,fontFamily:'monospace',lineHeight:1.7,color:'#e2e8f0',whiteSpace:'pre-wrap',border:'1px solid rgba(255,255,255,0.05)'}}>
+                {selected.prompt_text}
+              </div>
+            )}
+
+            {testResult && (
+              <div style={{marginTop:12}}>
+                <div style={{fontSize:11,color:'#c084fc',marginBottom:4}}>▶ Résultat du test :</div>
+                <div style={{background:'rgba(168,85,247,0.08)',borderRadius:8,padding:12,fontSize:12,color:'#e2e8f0',whiteSpace:'pre-wrap',border:'1px solid rgba(168,85,247,0.2)',lineHeight:1.6}}>
+                  {testResult}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 };
 
 const SpontaneesPage = () => {
@@ -2422,6 +2612,7 @@ const CronsPage = () => {
       case 'veille-comp': return <VeilleCompetencesPage key={Date.now()}/>
       case 'crons': return <CronsPage/>;
       case 'spontanees': return <SpontaneesPage/>;
+      case 'prompts': return <PromptManagerPage/>;
       default: return null;
     }
   };

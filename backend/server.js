@@ -2921,6 +2921,86 @@ Mohamed Assalia Maiga</p>`;
     res.json({ success: true, message: 'Relance envoyée' });
   } catch(e) { res.status(500).json({ error: e.message }); }
 });
+
+// ── PROMPT MANAGER ────────────────────────────────────────────────────────────
+app.get('/api/prompts', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM ja_prompts ORDER BY categorie, nom');
+    res.json(r.rows);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/prompts/:id', async (req, res) => {
+  try {
+    const r = await pool.query('SELECT * FROM ja_prompts WHERE id=$1', [req.params.id]);
+    if(r.rows.length === 0) return res.status(404).json({ error: 'Prompt non trouvé' });
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/prompts', async (req, res) => {
+  try {
+    const { nom, categorie, description, prompt_text, variables } = req.body;
+    if(!nom || !prompt_text) return res.status(400).json({ error: 'nom et prompt_text requis' });
+    const r = await pool.query(
+      'INSERT INTO ja_prompts (nom, categorie, description, prompt_text, variables, prompt_original) VALUES ($1,$2,$3,$4,$5,$4) RETURNING *',
+      [nom, categorie||'Autre', description||'', prompt_text, variables||[]]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/prompts/:id', async (req, res) => {
+  try {
+    const { nom, categorie, description, prompt_text, variables, actif } = req.body;
+    const r = await pool.query(
+      'UPDATE ja_prompts SET nom=$1, categorie=$2, description=$3, prompt_text=$4, variables=$5, actif=$6, version=version+1, updated_at=NOW() WHERE id=$7 RETURNING *',
+      [nom, categorie, description, prompt_text, variables||[], actif !== false, req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/prompts/:id/reset', async (req, res) => {
+  try {
+    const r = await pool.query(
+      'UPDATE ja_prompts SET prompt_text=prompt_original, version=1, updated_at=NOW() WHERE id=$1 RETURNING *',
+      [req.params.id]
+    );
+    res.json(r.rows[0]);
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/prompts/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM ja_prompts WHERE id=$1', [req.params.id]);
+    res.json({ success: true });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/prompts/:id/tester', async (req, res) => {
+  try {
+    const { variables_test } = req.body;
+    const prompt = await pool.query('SELECT * FROM ja_prompts WHERE id=$1', [req.params.id]);
+    if(prompt.rows.length === 0) return res.status(404).json({ error: 'Prompt non trouvé' });
+    let promptText = prompt.rows[0].prompt_text;
+    // Remplacer les variables de test
+    if(variables_test) {
+      Object.entries(variables_test).forEach(([key, val]) => {
+        promptText = promptText.replace(new RegExp('\\$\\{'+key+'\\}', 'g'), val);
+      });
+    }
+    // Appeler Claude
+    const https = require('https');
+    const body = JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,messages:[{role:'user',content:promptText}]});
+    const result = await new Promise((resolve) => {
+      const req2 = https.request({hostname:'api.anthropic.com',path:'/v1/messages',method:'POST',headers:{'Content-Type':'application/json','x-api-key':process.env.ANTHROPIC_API_KEY,'anthropic-version':'2023-06-01','Content-Length':Buffer.byteLength(body)}},r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{resolve(JSON.parse(d).content[0].text);}catch(e){resolve('Erreur: '+e.message);}});});
+      req2.on('error',()=>resolve('Erreur réseau'));
+      req2.write(body);req2.end();
+    });
+    res.json({ result, prompt_utilise: promptText });
+  } catch(e) { res.status(500).json({ error: e.message }); }
+});
 // ── GESTION DES CRONS ─────────────────────────────────────────────────────────
 const { exec: execCron } = require('child_process');
 
